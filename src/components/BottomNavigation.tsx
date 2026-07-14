@@ -9,7 +9,7 @@ const items = [
   { label: "Today", icon: Home, href: "/", enabled: true },
   { label: "Meals", icon: Soup, href: "/meals", enabled: true },
   { label: "Train", icon: Dumbbell, href: "/train", enabled: true },
-  { label: "Progress", icon: TrendingUp, href: "/progress", enabled: false },
+  { label: "Progress", icon: TrendingUp, href: "/progress", enabled: true },
   { label: "More", icon: MoreHorizontal, href: "/sync", enabled: true }
 ];
 

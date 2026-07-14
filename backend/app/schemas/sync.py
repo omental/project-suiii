@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-EntityType = Literal["daily_tracking", "meal_log", "workout_session", "profile"]
+EntityType = Literal["daily_tracking", "meal_log", "workout_session", "profile", "body_measurement", "weekly_check_in"]
 
 
 class DailyTrackingUpsert(BaseModel):

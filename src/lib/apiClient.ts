@@ -72,3 +72,14 @@ export function fetchMe() {
 export function fetchSyncStatus() {
   return apiRequest<SyncStatus>("/sync/status");
 }
+
+export function requestProgressReport(kind: "weekly" | "monthly", period_start: string, period_end: string) {
+  return apiRequest<{ id: string; report_type: string; period_start: string; period_end: string; status: string; generated_at: string }>(`/reports/${kind}`, {
+    method: "POST",
+    body: JSON.stringify({ period_start, period_end })
+  });
+}
+
+export function reportDownloadUrl(reportId: string) {
+  return `${getApiBaseUrl()}/reports/${reportId}/download`;
+}

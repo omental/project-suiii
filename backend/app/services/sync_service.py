@@ -10,11 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
+from app.models.body_measurement import BodyMeasurement
 from app.models.daily_tracking import DailyTracking
 from app.models.meal_log import MealLog
 from app.models.migration_batch import MigrationBatch
 from app.models.sync_device import SyncDevice
 from app.models.sync_mutation import SyncMutation
+from app.models.weekly_check_in import WeeklyCheckIn
 from app.models.workout_session import WorkoutSession
 from app.schemas.sync import MigrationRequest, MigrationResponse, MutationRequest, MutationResult
 
@@ -50,6 +52,10 @@ class SyncService:
             result = await self._apply_domain_record(user_id, mutation, MealLog, "meal_definition_id")
         elif mutation.entity_type == "workout_session":
             result = await self._apply_domain_record(user_id, mutation, WorkoutSession, "workout_definition_id")
+        elif mutation.entity_type == "body_measurement":
+            result = await self._apply_body_measurement(user_id, mutation)
+        elif mutation.entity_type == "weekly_check_in":
+            result = await self._apply_weekly_check_in(user_id, mutation)
         else:
             result = MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", payload=mutation.payload)
 
@@ -82,6 +88,62 @@ class SyncService:
             record.deleted_at = utc_now()
         else:
             for field in ("water_ml", "cigarettes", "sleep_minutes", "badminton_games", "energy", "soreness", "notes"):
+                if field in payload:
+                    setattr(record, field, payload[field])
+            record.version = max(record.version + 1, payload.get("version", 1))
+        await self.db.flush()
+        return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
+
+    async def _apply_body_measurement(self, user_id: UUID, mutation: MutationRequest) -> MutationResult:
+        payload = mutation.payload
+        record = await self.db.scalar(
+            select(BodyMeasurement).where(
+                BodyMeasurement.user_id == user_id,
+                BodyMeasurement.client_record_id == payload["client_record_id"],
+            )
+        )
+        if record and payload.get("version", 1) < record.version:
+            return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="conflict", server_version=record.version, payload={"server_updated_at": record.updated_at.isoformat()})
+        if record is None:
+            record = BodyMeasurement(
+                user_id=user_id,
+                client_record_id=payload["client_record_id"],
+                measured_at=payload["measured_at"],
+                local_date=payload["local_date"],
+            )
+            self.db.add(record)
+        if mutation.mutation_type == "delete":
+            record.deleted_at = utc_now()
+        else:
+            for field in ("measured_at", "local_date", "weight_kg", "waist_in", "chest_in", "arm_in", "thigh_in", "source", "note"):
+                if field in payload:
+                    setattr(record, field, payload[field])
+            record.version = max(record.version + 1, payload.get("version", 1))
+        await self.db.flush()
+        return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
+
+    async def _apply_weekly_check_in(self, user_id: UUID, mutation: MutationRequest) -> MutationResult:
+        payload = mutation.payload
+        record = await self.db.scalar(
+            select(WeeklyCheckIn).where(
+                WeeklyCheckIn.user_id == user_id,
+                WeeklyCheckIn.client_record_id == payload["client_record_id"],
+            )
+        )
+        if record and payload.get("version", 1) < record.version:
+            return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="conflict", server_version=record.version, payload={"server_updated_at": record.updated_at.isoformat()})
+        if record is None:
+            record = WeeklyCheckIn(
+                user_id=user_id,
+                client_record_id=payload["client_record_id"],
+                week_number=payload["week_number"],
+                check_in_date=payload["check_in_date"],
+            )
+            self.db.add(record)
+        if mutation.mutation_type == "delete":
+            record.deleted_at = utc_now()
+        else:
+            for field in ("week_number", "check_in_date", "status", "energy", "hunger", "digestion", "average_sleep_minutes", "private_note", "measurement_id", "completed_at"):
                 if field in payload:
                     setattr(record, field, payload[field])
             record.version = max(record.version + 1, payload.get("version", 1))

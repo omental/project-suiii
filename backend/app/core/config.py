@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -20,6 +21,11 @@ class Settings(BaseSettings):
     session_minutes: int = 60 * 12
     remember_me_days: int = 30
     last_seen_write_interval_seconds: int = 300
+    private_upload_root: Path = Field(Path("private_uploads"), alias="PRIVATE_UPLOAD_ROOT")
+    max_progress_photo_bytes: int = Field(8 * 1024 * 1024, alias="MAX_PROGRESS_PHOTO_BYTES")
+    max_image_pixels: int = Field(16_000_000, alias="MAX_IMAGE_PIXELS")
+    processed_photo_max_width: int = Field(1600, alias="PROCESSED_PHOTO_MAX_WIDTH")
+    processed_photo_quality: int = Field(82, alias="PROCESSED_PHOTO_QUALITY")
 
     @field_validator("database_url")
     @classmethod

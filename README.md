@@ -4,7 +4,7 @@
 
 Tagline: **Build Your Ultimate Form**
 
-Phase 4 adds the FastAPI/PostgreSQL backend foundation, private authentication, local-data migration, offline mutation queue, and sync-status UI. Production deployment, Nginx and SSL are still reserved for a later phase.
+Phase 4 adds the FastAPI/PostgreSQL backend foundation, private authentication, local-data migration, offline mutation queue, and sync-status UI. Phase 5 adds private progress tracking: measurements, weekly check-ins, local progress-photo capture, deterministic transformation analytics, conservative forecasting, milestones and backend-generated PDF reports. Production deployment, Nginx and SSL are still reserved for a later phase.
 
 ## Phase 1 Scope
 
@@ -62,6 +62,19 @@ Phase 4 adds the FastAPI/PostgreSQL backend foundation, private authentication, 
 - Sync & Data screen
 - Rest timer beep/vibration completion polish
 
+## Phase 5 Capabilities
+
+- Progress dashboard and enabled Progress bottom navigation
+- Weight and waist-at-navel logging with optional chest, arm and thigh values
+- Three-step weekly check-in: measure, photos, review
+- Private local progress-photo capture and comparison controls
+- Measurement history with accessible chart values and deletion confirmation
+- Deterministic adherence, smoking trend, milestone and coaching-insight calculations
+- Conservative target-range forecast only when enough reliable data exists
+- Weekly and monthly report requests backed by private backend PDF generation
+- Backend persistence for measurements, check-ins, photos, milestones and reports
+- Offline mutation queue entries for measurements and check-ins
+
 ## Routes
 
 - `/` - Today dashboard
@@ -78,6 +91,13 @@ Phase 4 adds the FastAPI/PostgreSQL backend foundation, private authentication, 
 - `/sign-in` - Private account sign-in
 - `/sync/migrate` - Local-data migration flow
 - `/sync` - Sync & Data status
+- `/progress` - Progress dashboard
+- `/progress/history` - Measurement and check-in history
+- `/progress/check-in` - Weekly check-in measure step
+- `/progress/photos` - Private progress photo capture
+- `/progress/photos/compare` - Private photo comparison
+- `/progress/review/[checkInId]` - Weekly review and insight
+- `/progress/reports` - Weekly/monthly PDF report requests
 
 Dates use stable `YYYY-MM-DD` strings.
 
@@ -149,7 +169,31 @@ Full installability will require HTTPS in production and a correctly configured 
 
 ## Local Mock-State Limitations
 
-Water increments, cigarette increments, nutrition logs, weighing sessions, substitutions, skipped meals, completed meals, workout sessions, readiness checks, rest timers, set logs, feedback and training history still work locally first. Phase 4 adds migration and sync adapters so this state can be uploaded to the private PostgreSQL backend after sign-in.
+Water increments, cigarette increments, nutrition logs, weighing sessions, substitutions, skipped meals, completed meals, workout sessions, readiness checks, rest timers, set logs, feedback and training history still work locally first. Phase 4 adds migration and sync adapters so this state can be uploaded to the private PostgreSQL backend after sign-in. Phase 5 stores measurements and weekly check-ins locally first and queues them as `body_measurement` and `weekly_check_in` mutations. Photo blobs are treated differently: local previews are never called backed up until the server acknowledges an authenticated upload.
+
+## Phase 5 Measurement Rules
+
+- Weight is stored and displayed in kilograms.
+- Circumferences are stored and displayed in inches.
+- Waist means waist at navel.
+- Values must be positive and realistically bounded.
+- One measurement is not treated as proof of progress or regression.
+- Weekly guidance: same scale, same location, after using the toilet, before food or water, same tape position, tape level and not pulled excessively tight.
+
+## Phase 5 Analytics
+
+- Weight change is current minus starting weight.
+- Waist change is current minus starting waist.
+- Meal adherence is completed planned meals divided by eligible planned meals.
+- Protein target days use a consistent 100% target rule.
+- Water target days require reaching the configured daily water target.
+- Smoking trend shows baseline when established, daily limit, today and seven-day average. Ordinary misses are not framed as failure.
+- Milestones are deterministic and based on actual persisted or local data.
+- Forecasting requires at least three sufficiently separated weight measurements, a trend toward the target range and a plausible weekly rate. Forecasts are ranges and never guarantees.
+
+## Phase 5 Photo Privacy
+
+Progress photos are private by design. The frontend uses camera APIs only when supported and permission is granted, always offers file input fallback, and does not claim local photos are backed up before upload succeeds. The backend decodes and re-encodes accepted images, strips metadata, stores files outside `public/`, and serves them only through authenticated `private, no-store` endpoints.
 
 The local repositories are versioned. Phase 2 migrates preserved Phase 1 water, cigarette, timeline, and weighing values where possible. Phase 3 stores training state separately under a versioned key and falls back to safe defaults when local data is malformed.
 
@@ -304,15 +348,13 @@ Phase 4:
 - Authentication - implemented
 - API integration - implemented
 
-Recommended Phase 5 starting point: persist weight, waist, progress photos, weekly reports and richer recovery metrics through the Phase 4 sync layer.
-
 Phase 5:
 
-- Weight and waist history
-- Progress photographs
-- Dashboard charts
-- Weekly reports
-- Sleep, recovery and readiness
+- Weight and waist history - implemented
+- Progress photographs - implemented privately
+- Dashboard charts - implemented with accessible values
+- Weekly reports - implemented
+- Sleep, recovery and readiness - implemented in weekly check-ins
 
 Phase 6:
 
@@ -321,6 +363,7 @@ Phase 6:
 - Steps
 - Badminton data
 - Automated activity syncing
+- Photo upload retry dashboard and richer conflict review
 
 Phase 7:
 

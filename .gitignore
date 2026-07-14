@@ -11,3 +11,10 @@ yarn-error.log*
 pnpm-debug.log*
 *.tsbuildinfo
 dev-server*.log
+backend/private_uploads/
+backend/generated_reports/
+private_uploads/
+generated_reports/
+backend/pytest-cache-files-*/
+backend/.pytest_cache/
+backend/.ruff_cache/

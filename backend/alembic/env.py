@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models import daily_tracking, meal_log, migration_batch, sync_device, sync_mutation, user, user_profile, user_session, workout_session  # noqa: F401
+from app.models import body_measurement, daily_tracking, generated_report, meal_log, migration_batch, progress_milestone, progress_photo, sync_device, sync_mutation, user, user_profile, user_session, weekly_check_in, workout_session  # noqa: F401
 
 config = context.config
 

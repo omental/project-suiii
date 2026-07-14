@@ -1,4 +1,4 @@
-export type SyncEntityType = "daily_tracking" | "meal_log" | "workout_session" | "profile";
+export type SyncEntityType = "daily_tracking" | "meal_log" | "workout_session" | "profile" | "body_measurement" | "weekly_check_in";
 
 export type SyncMutation = {
   client_mutation_id: string;
