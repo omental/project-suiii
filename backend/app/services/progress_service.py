@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -13,6 +14,7 @@ from app.models.body_measurement import BodyMeasurement
 from app.models.daily_tracking import DailyTracking
 from app.models.meal_log import MealLog
 from app.models.progress_milestone import ProgressMilestone
+from app.models.user import User
 from app.models.user_profile import UserProfile
 from app.models.weekly_check_in import WeeklyCheckIn
 from app.models.workout_session import WorkoutSession
@@ -29,6 +31,7 @@ from app.schemas.progress import (
 )
 
 PROGRAMME_DAYS = 90
+DHAKA_TZ = ZoneInfo("Asia/Dhaka")
 
 
 def q(value: Decimal | int | float | None) -> Decimal | None:
@@ -38,7 +41,7 @@ def q(value: Decimal | int | float | None) -> Decimal | None:
 
 
 def today_dhaka() -> date:
-    return utc_now().astimezone().date()
+    return utc_now().astimezone(DHAKA_TZ).date()
 
 
 class ProgressService:
@@ -173,6 +176,24 @@ class ProgressService:
             await self.db.flush()
         return profile
 
+    async def programme_start_date(self, user_id: UUID, profile: UserProfile) -> date:
+        if profile.programme_start_date is not None:
+            return profile.programme_start_date
+        candidates = [
+            await self.db.scalar(select(func.min(BodyMeasurement.local_date)).where(BodyMeasurement.user_id == user_id, BodyMeasurement.deleted_at.is_(None))),
+            await self.db.scalar(select(func.min(WeeklyCheckIn.check_in_date)).where(WeeklyCheckIn.user_id == user_id, WeeklyCheckIn.deleted_at.is_(None))),
+            await self.db.scalar(select(func.min(MealLog.local_date)).where(MealLog.user_id == user_id)),
+            await self.db.scalar(select(func.min(WorkoutSession.local_date)).where(WorkoutSession.user_id == user_id)),
+            await self.db.scalar(select(func.min(DailyTracking.tracking_date)).where(DailyTracking.user_id == user_id)),
+        ]
+        user = await self.db.get(User, user_id)
+        if user is not None:
+            candidates.append(user.created_at.astimezone(DHAKA_TZ).date())
+        start = min(candidate for candidate in candidates if candidate is not None) if any(candidate is not None for candidate in candidates) else today_dhaka()
+        profile.programme_start_date = start
+        await self.db.flush()
+        return start
+
     async def adherence(self, user_id: UUID) -> AdherenceSummary:
         today = today_dhaka()
         start = today - timedelta(days=6)
@@ -304,7 +325,7 @@ class ProgressService:
             .where(WeeklyCheckIn.user_id == user_id, WeeklyCheckIn.deleted_at.is_(None))
             .order_by(WeeklyCheckIn.check_in_date.desc())
         )
-        start = profile.programme_start_date or date(2026, 7, 14)
+        start = await self.programme_start_date(user_id, profile)
         day = max(1, min(PROGRAMME_DAYS, (today_dhaka() - start).days + 1))
         weight_change = q(current.weight_kg - profile.starting_weight_kg) if current and current.weight_kg is not None else None
         waist_change = q(current.waist_in - profile.starting_waist_in) if current and current.waist_in is not None else None

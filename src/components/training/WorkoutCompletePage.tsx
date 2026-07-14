@@ -8,7 +8,6 @@ import { useNutritionRepository } from "@/hooks/useNutritionRepository";
 import { roundNutrition } from "@/lib/nutritionCalc";
 import { useTrainingRepository } from "@/hooks/useTrainingRepository";
 import { StatTile, TrainingButton } from "@/components/training/TrainingChrome";
-import { dashboardData } from "@/data/dashboard";
 
 function fmtDuration(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -21,7 +20,7 @@ export function WorkoutCompletePage({ sessionId }: { sessionId: string }) {
   const { repository, saveFeedback } = useTrainingRepository();
   const nutrition = useNutritionRepository();
   const session = repository.getSession(sessionId);
-  const summary = nutrition.repository.getDailyNutritionSummary(dashboardData.dateISO);
+  const summary = nutrition.repository.getDailyNutritionSummary(session?.date ?? "");
   const consumed = roundNutrition(summary.consumed);
 
   if (!session) {

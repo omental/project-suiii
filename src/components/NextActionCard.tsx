@@ -12,9 +12,10 @@ type NextActionCardProps = {
   completed: boolean;
   onComplete: (actualGrams: number) => void;
   href?: string;
+  ctaLabel?: string;
 };
 
-export function NextActionCard({ action, actualGrams, completed, onComplete, href }: NextActionCardProps) {
+export function NextActionCard({ action, actualGrams, completed, onComplete, href, ctaLabel }: NextActionCardProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -45,8 +46,13 @@ export function NextActionCard({ action, actualGrams, completed, onComplete, hre
             href={href}
             className="focus-ring mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-suii-lime px-5 py-3 font-black uppercase text-black transition active:scale-[0.99]"
           >
-            Start Weighing
+            {ctaLabel ?? "Start Weighing"}
           </Link>
+        ) : completed ? (
+          <div className="mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl border border-suii-lime/60 px-5 py-3 font-black uppercase text-suii-lime">
+            <CheckCircle2 className="size-5" aria-hidden="true" />
+            {ctaLabel ?? "Complete"}
+          </div>
         ) : (
           <button
             type="button"

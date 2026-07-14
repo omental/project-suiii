@@ -1,4 +1,6 @@
 import { enqueueMutation, readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
+import { getProgrammeStartDate } from "@/lib/dashboardSelectors";
+import { getDhakaDateKey, getProgrammePosition } from "@/lib/dhakaClock";
 import type { BodyMeasurement, DigestionLevel, ProgressLocalState, ProgressPose, WeeklyCheckIn, WellbeingLevel } from "@/types/progress";
 
 const progressKey = "project-suiii:phase-5-progress";
@@ -47,11 +49,12 @@ function enqueue(entityType: "body_measurement" | "weekly_check_in", entityId: s
 
 export function saveMeasurement(state: ProgressLocalState, input: Partial<BodyMeasurement>): ProgressLocalState {
   const now = new Date().toISOString();
+  const localDate = getDhakaDateKey();
   const measurement: BodyMeasurement = {
     id: input.id ?? id("measurement"),
     clientRecordId: input.clientRecordId ?? id("measurement-client"),
     measuredAt: input.measuredAt ?? now,
-    localDate: input.localDate ?? now.slice(0, 10),
+    localDate: input.localDate ?? localDate,
     weightKg: input.weightKg ?? null,
     waistIn: input.waistIn ?? null,
     chestIn: input.chestIn ?? null,
@@ -101,6 +104,7 @@ export function startOrUpdateDraftCheckIn(
   }
 ) {
   const now = new Date().toISOString();
+  const today = getDhakaDateKey();
   const existing = state.currentDraftCheckInId ? state.checkIns[state.currentDraftCheckInId] : null;
   const measurementState = saveMeasurement(state, {
     weightKg: input.weightKg ?? null,
@@ -111,11 +115,16 @@ export function startOrUpdateDraftCheckIn(
     source: "check_in"
   });
   const measurement = Object.values(measurementState.measurements).sort((a, b) => b.measuredAt.localeCompare(a.measuredAt))[0];
+  const activityDates = [
+    ...Object.values(measurementState.measurements).filter((measurementItem) => !measurementItem.deletedAt).map((measurementItem) => measurementItem.localDate),
+    ...Object.values(measurementState.checkIns).filter((checkInItem) => !checkInItem.deletedAt && checkInItem.status === "completed").map((checkInItem) => checkInItem.checkInDate)
+  ];
+  const programmeStartDate = getProgrammeStartDate(today, activityDates);
   const checkIn: WeeklyCheckIn = {
     id: existing?.id ?? id("check-in"),
     clientRecordId: existing?.clientRecordId ?? id("check-in-client"),
-    weekNumber: existing?.weekNumber ?? Math.max(1, Math.ceil((Date.now() - new Date("2026-07-14T00:00:00").getTime()) / 604800000)),
-    checkInDate: now.slice(0, 10),
+    weekNumber: existing?.weekNumber ?? getProgrammePosition(programmeStartDate, today).week,
+    checkInDate: today,
     status: "draft",
     energy: input.energy ?? existing?.energy ?? null,
     hunger: input.hunger ?? existing?.hunger ?? null,

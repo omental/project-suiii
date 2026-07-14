@@ -125,7 +125,13 @@ export const weeklyMealPlan: WeeklyMealPlan = {
 };
 
 export function getPlanDay(date: string) {
-  return weeklyMealPlan.days.find((dayItem) => dayItem.date === date) ?? weeklyMealPlan.days[0];
+  const exact = weeklyMealPlan.days.find((dayItem) => dayItem.date === date);
+  if (exact) return exact;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return weeklyMealPlan.days[0];
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(new Date(`${date}T12:00:00.000Z`));
+  const template = weeklyMealPlan.days.find((dayItem) => dayItem.dayName === weekday) ?? weeklyMealPlan.days[0];
+  const label = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(new Date(`${date}T12:00:00.000Z`)).toUpperCase();
+  return { ...template, date, dayLabel: label, dayName: weekday };
 }
 
 export function getMealDefinition(date: string, mealId: string) {

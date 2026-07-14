@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { AppShell } from "@/components/AppShell";
 import { DailyTargets } from "@/components/DailyTargets";
@@ -10,9 +11,13 @@ import { WorkoutPreviewCard } from "@/components/WorkoutPreviewCard";
 import { dashboardData } from "@/data/dashboard";
 import { getPlanDay } from "@/data/nutrition";
 import { equipmentLabels, getExerciseDefinition, getWorkoutForDate } from "@/data/training";
+import { buildProgrammeSnapshot, selectNextDashboardAction } from "@/lib/dashboardSelectors";
+import { useDhakaClock } from "@/lib/dhakaClock";
 import { roundNutrition } from "@/lib/nutritionCalc";
+import { defaultProgressState, readProgressState } from "@/lib/progressRepository";
 import { useNutritionRepository } from "@/hooks/useNutritionRepository";
 import { useTrainingRepository } from "@/hooks/useTrainingRepository";
+import type { ProgressLocalState } from "@/types/progress";
 
 export function TodayDashboard() {
   const {
@@ -24,24 +29,47 @@ export function TodayDashboard() {
     undoCigarette
   } = useNutritionRepository();
   const training = useTrainingRepository();
-  const todayDate = dashboardData.dateISO;
+  const clock = useDhakaClock();
+  const [progressState, setProgressState] = useState<ProgressLocalState>(defaultProgressState);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setProgressState(readProgressState()), 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+  if (!clock.hydrated) {
+    return (
+      <AppShell>
+        <AppHeader dashboard={dashboardData} displayDate="" greeting="" streakDays={0} />
+      </AppShell>
+    );
+  }
+  const todayDate = clock.dateKey;
   const day = getPlanDay(todayDate);
   const activeTrainingSession = training.repository.getActiveSession();
   const todayWorkout = activeTrainingSession ? training.repository.getWorkoutDefinition(activeTrainingSession.workoutDefinitionId) : getWorkoutForDate(todayDate);
   const completedWorkout = training.repository.getSessionHistory().find((session) => session.date === todayDate && session.status === "completed");
   const summary = repository.getDailyNutritionSummary(todayDate);
   const consumed = roundNutrition(summary.consumed);
-  const waterBase = dashboardData.metrics.find((metric) => metric.id === "water")?.value ?? 0;
-  const cigaretteBase = dashboardData.metrics.find((metric) => metric.id === "cigarettes")?.value ?? 0;
-  const waterLitres = Number((waterBase + state.waterIncrementsMl.reduce((total, amount) => total + amount, 0) / 1000).toFixed(2));
-  const cigarettes = Math.max(0, cigaretteBase + state.cigaretteIncrements.reduce((total, amount) => total + amount, 0));
-  const nextMeal = day.meals.find((meal) => {
-    const status = repository.getMealStatus(todayDate, meal.id);
-    return status === "up_next" || status === "in_progress";
-  }) ?? day.meals[0];
+  const waterLitres = Number((state.waterIncrementsMl.reduce((total, amount) => total + amount, 0) / 1000).toFixed(2));
+  const cigarettes = Math.max(0, state.cigaretteIncrements.reduce((total, amount) => total + amount, 0));
+  const dhakaMinuteOfDay = clock.parts ? clock.parts.hour * 60 + clock.parts.minute : 0;
+  const nextAction = selectNextDashboardAction(todayDate, dhakaMinuteOfDay, state, training.state);
+  const programme = buildProgrammeSnapshot(todayDate, state, training.state, progressState);
+  const dashboard = {
+    ...dashboardData,
+    dateISO: todayDate,
+    streakDays: programme.activeStreak,
+    transformation: {
+      ...dashboardData.transformation,
+      week: programme.week,
+      day: programme.day,
+      progressPercent: programme.progressPercent
+    }
+  };
   const metrics = dashboardData.metrics.map((metric) => {
     if (metric.id === "calories") return { ...metric, value: consumed.calories };
     if (metric.id === "protein") return { ...metric, value: consumed.protein };
+    if (metric.id === "water") return { ...metric, value: waterLitres };
+    if (metric.id === "cigarettes") return { ...metric, value: cigarettes };
     return metric;
   });
   const timelineEntries = day.meals.slice(0, 3).map((meal) => {
@@ -78,22 +106,23 @@ export function TodayDashboard() {
 
   return (
     <AppShell>
-      <AppHeader dashboard={dashboardData} />
+      <AppHeader dashboard={dashboard} displayDate={clock.displayDate} greeting={clock.greeting} streakDays={programme.activeStreak} />
       <div className="grid gap-3 px-3 pt-6 sm:px-4">
-        <TransformationCard dashboard={dashboardData} />
+        <TransformationCard dashboard={dashboard} />
         <NextActionCard
           action={{
-            id: nextMeal.id,
-            time: nextMeal.time,
-            label: "Next",
-            title: nextMeal.name,
-            ingredient: nextMeal.ingredients[0]?.foodId ?? "Meal",
-            targetGrams: nextMeal.ingredients[0]?.targetAmount ?? 0
+            id: nextAction.id,
+            time: nextAction.time,
+            label: nextAction.label,
+            title: nextAction.title,
+            ingredient: nextAction.ingredient,
+            targetGrams: nextAction.targetGrams
           }}
           actualGrams={null}
-          completed={repository.getMealStatus(todayDate, nextMeal.id) === "completed"}
+          completed={nextAction.type === "complete"}
           onComplete={() => undefined}
-          href={`/meals/${todayDate}/${nextMeal.id}/weigh`}
+          href={nextAction.href}
+          ctaLabel={nextAction.type === "workout" ? "Start Workout" : nextAction.type === "complete" ? "Complete" : undefined}
         />
         <DailyTargets
           metrics={metrics}

@@ -6,14 +6,17 @@ import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { MealCard } from "@/components/nutrition/MealCard";
 import { NutritionHeader } from "@/components/nutrition/NutritionHeader";
-import { foodCatalogue, weeklyMealPlan, weighingRules } from "@/data/nutrition";
+import { foodCatalogue, getPlanDay, weeklyMealPlan, weighingRules } from "@/data/nutrition";
+import { useDhakaClock } from "@/lib/dhakaClock";
 import { mealPlannedNutrition, roundNutrition } from "@/lib/nutritionCalc";
 import { useNutritionRepository } from "@/hooks/useNutritionRepository";
 
 export function SevenDayPlan() {
   const { state, repository } = useNutritionRepository();
-  const [activeDate, setActiveDate] = useState("2026-07-14");
-  const activeDay = weeklyMealPlan.days.find((day) => day.date === activeDate) ?? weeklyMealPlan.days[0];
+  const clock = useDhakaClock();
+  const [activeDate, setActiveDate] = useState("");
+  const selectedDate = activeDate || clock.dateKey;
+  const activeDay = getPlanDay(selectedDate);
   const summary = repository.getDailyNutritionSummary(activeDay.date);
 
   return (

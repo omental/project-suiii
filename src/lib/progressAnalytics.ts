@@ -1,20 +1,19 @@
 import { dashboardData } from "@/data/dashboard";
 import { nutritionTargets } from "@/data/nutrition";
+import { collectActivityDates, getProgrammeStartDate } from "@/lib/dashboardSelectors";
+import { daysBetween as dhakaDaysBetween, getDhakaDateKey, getWeekdayName } from "@/lib/dhakaClock";
 import { readNutritionState } from "@/lib/nutritionRepository";
 import { readTrainingState } from "@/lib/trainingRepository";
 import type { BodyMeasurement, ProgressLocalState, ProgressSummaryLocal } from "@/types/progress";
 
-export const programmeStartDate = "2026-07-14";
 export const programmeTotalDays = 90;
 
 export function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return getDhakaDateKey();
 }
 
 export function daysBetween(start: string, end: string) {
-  const startDate = new Date(`${start}T12:00:00`);
-  const endDate = new Date(`${end}T12:00:00`);
-  return Math.round((endDate.getTime() - startDate.getTime()) / 86400000);
+  return dhakaDaysBetween(start, end);
 }
 
 export function sortedMeasurements(state: ProgressLocalState) {
@@ -72,11 +71,12 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
   const previous = measurements.length > 1 ? measurements.at(-2)! : null;
   const nutrition = readNutritionState();
   const training = readTrainingState();
+  const today = todayISO();
+  const programmeStartDate = getProgrammeStartDate(today, collectActivityDates(nutrition, training, state));
   const completedMeals = Object.values(nutrition.mealLogs).filter((meal) => meal.status === "completed").length;
   const completedWorkouts = Object.values(training.sessions).filter((session) => session.status === "completed").length;
-  const waterLitres = dashboardData.metrics.find((metric) => metric.id === "water")?.value ?? 0;
   const waterAdded = nutrition.waterIncrementsMl.reduce((sum, amount) => sum + amount, 0) / 1000;
-  const cigaretteToday = (dashboardData.metrics.find((metric) => metric.id === "cigarettes")?.value ?? 0) + nutrition.cigaretteIncrements.reduce((sum, amount) => sum + amount, 0);
+  const cigaretteToday = nutrition.cigaretteIncrements.reduce((sum, amount) => sum + amount, 0);
   const weightChange = latest?.weightKg === null || !latest ? null : latest.weightKg - dashboardData.user.startingWeightKg;
   const waistChange = latest?.waistIn === null || !latest ? null : latest.waistIn - dashboardData.user.startingWaistIn;
   const recentMilestones = [];
@@ -93,7 +93,7 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
       ? "Current approach appears consistent with the goal."
       : "Review adherence before changing targets.";
   return {
-    programmeDay: Math.max(1, Math.min(programmeTotalDays, daysBetween(programmeStartDate, todayISO()) + 1)),
+    programmeDay: Math.max(1, Math.min(programmeTotalDays, daysBetween(programmeStartDate, today) + 1)),
     programmeTotalDays,
     currentWeightKg: latest?.weightKg ?? null,
     startingWeightKg: dashboardData.user.startingWeightKg,
@@ -108,7 +108,7 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
     workoutAdherence: { completed: completedWorkouts, planned: 3 },
     mealAdherence: { completed: completedMeals, planned: 35 },
     proteinDays,
-    waterDays: waterLitres + waterAdded >= nutritionTargets.waterLitres ? 1 : 0,
+    waterDays: waterAdded >= nutritionTargets.waterLitres ? 1 : 0,
     badmintonDays: nutrition.completedTimelineIds.includes("badminton-0900") ? 1 : 0,
     fridayRest: true,
     smoking: {
@@ -119,7 +119,7 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
       previousSevenDayAverage: state.smokingBaseline,
       percentageChange: state.smokingBaseline ? round(((cigaretteToday - state.smokingBaseline) / state.smokingBaseline) * 100, 0) : null
     },
-    checkInDue: new Date(`${todayISO()}T12:00:00`).getDay() === 6,
+    checkInDue: getWeekdayName(today) === "Saturday",
     recentMilestones,
     insight: previous ? insight : "One week is not enough to establish a plateau.",
     forecast

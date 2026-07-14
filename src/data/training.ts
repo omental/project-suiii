@@ -217,6 +217,7 @@ export function getWorkoutDefinition(id: string) {
 }
 
 export function getWorkoutForDate(dateISO: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return null;
   const date = new Date(`${dateISO}T12:00:00`);
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
   const schedule = weeklyTrainingSchedule.find((entry) => entry.dayName === dayName) ?? weeklyTrainingSchedule[0];

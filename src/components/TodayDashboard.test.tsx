@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TodayDashboard } from "@/components/TodayDashboard";
 import { createInitialLogs } from "@/lib/nutritionCalc";
 import { completeMeal, defaultPhase2State, resetNutritionStateForTests, writeNutritionState } from "@/lib/nutritionRepository";
@@ -9,8 +9,14 @@ import { getMealDefinition } from "@/data/nutrition";
 
 describe("TodayDashboard", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-07-13T23:30:00.000Z"));
     resetNutritionStateForTests();
     resetTrainingStateForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders the Today dashboard and transformation values", () => {
@@ -44,19 +50,19 @@ describe("TodayDashboard", () => {
   });
 
   it("increments and undoes water", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<TodayDashboard />);
 
-    expect(screen.getByText(/Water: 1.8 of 3.0 L/i)).toBeInTheDocument();
+    expect(screen.getByText(/Water: 0.0 of 3.0 L/i)).toBeInTheDocument();
     const waterControl = screen.getByRole("group", { name: /water quick actions/i });
     await user.click(within(waterControl).getByRole("button", { name: /\+250 ml/i }));
-    expect(screen.getByText(/Water: 2.0 of 3.0 L/i)).toBeInTheDocument();
+    expect(screen.getByText(/Water: 0.3 of 3.0 L/i)).toBeInTheDocument();
     await user.click(within(waterControl).getByRole("button", { name: /undo/i }));
-    expect(screen.getByText(/Water: 1.8 of 3.0 L/i)).toBeInTheDocument();
+    expect(screen.getByText(/Water: 0.0 of 3.0 L/i)).toBeInTheDocument();
   });
 
   it("increments and undoes cigarettes while preventing negative values", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<TodayDashboard />);
 
     const cigaretteControl = screen.getByRole("group", { name: /cigarettes quick actions/i });
@@ -64,9 +70,9 @@ describe("TodayDashboard", () => {
     expect(undo).toBeDisabled();
 
     await user.click(within(cigaretteControl).getByRole("button", { name: /\+1/i }));
-    expect(screen.getByText(/Cigarettes: 7 of 12/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cigarettes: 1 of 12/i)).toBeInTheDocument();
     await user.click(undo);
-    expect(screen.getByText(/Cigarettes: 6 of 12/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cigarettes: 0 of 12/i)).toBeInTheDocument();
     expect(undo).toBeDisabled();
   });
 

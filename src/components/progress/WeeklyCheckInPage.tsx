@@ -4,14 +4,14 @@ import { Camera, HeartPulse, Ruler, Scale } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ProgressChrome } from "@/components/progress/ProgressChrome";
-import { validateMeasurementInput } from "@/lib/progressAnalytics";
+import { latestMeasurement, validateMeasurementInput } from "@/lib/progressAnalytics";
 import { defaultProgressState, readProgressState, startOrUpdateDraftCheckIn, writeProgressState } from "@/lib/progressRepository";
 import type { DigestionLevel, ProgressLocalState, WellbeingLevel } from "@/types/progress";
 
 export function WeeklyCheckInPage() {
   const [state, setState] = useState<ProgressLocalState>(defaultProgressState);
-  const [weightKg, setWeightKg] = useState("76.8");
-  const [waistIn, setWaistIn] = useState("36.9");
+  const [weightKg, setWeightKg] = useState("");
+  const [waistIn, setWaistIn] = useState("");
   const [chestIn, setChestIn] = useState("");
   const [armIn, setArmIn] = useState("");
   const [thighIn, setThighIn] = useState("");
@@ -23,8 +23,14 @@ export function WeeklyCheckInPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setState(readProgressState());
+    const timeoutId = window.setTimeout(() => {
+      const stored = readProgressState();
+      setState(stored);
+      const latest = latestMeasurement(stored);
+      if (latest?.weightKg !== null && latest?.weightKg !== undefined) setWeightKg(String(latest.weightKg));
+      if (latest?.waistIn !== null && latest?.waistIn !== undefined) setWaistIn(String(latest.waistIn));
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   function saveDraft() {

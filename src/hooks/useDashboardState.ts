@@ -23,15 +23,13 @@ export function useDashboardState() {
   }, [isHydrated, state]);
 
   const waterLitres = useMemo(() => {
-    const base = dashboardData.metrics.find((metric) => metric.id === "water")?.value ?? 0;
     const added = state.waterIncrementsMl.reduce((total, amount) => total + amount, 0) / 1000;
-    return Number((base + added).toFixed(2));
+    return Number(added.toFixed(2));
   }, [state.waterIncrementsMl]);
 
   const cigarettes = useMemo(() => {
-    const base = dashboardData.metrics.find((metric) => metric.id === "cigarettes")?.value ?? 0;
     const added = state.cigaretteIncrements.reduce((total, amount) => total + amount, 0);
-    return Math.max(0, base + added);
+    return Math.max(0, added);
   }, [state.cigaretteIncrements]);
 
   return {

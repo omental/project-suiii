@@ -5,21 +5,33 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { CalendarDays, CheckCircle2, Clock3, Dumbbell, History, ShieldCheck } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { dashboardData } from "@/data/dashboard";
 import { equipmentLabels, getExerciseDefinition, getWorkoutDefinition, getWorkoutForDate } from "@/data/training";
+import { formatDhakaShortDate, getWeekdayName, useDhakaClock } from "@/lib/dhakaClock";
 import { suggestAdjustment } from "@/lib/trainingCalc";
 import { useTrainingRepository } from "@/hooks/useTrainingRepository";
 import { StatTile, TrainingButton } from "@/components/training/TrainingChrome";
 
 export function TrainDashboard() {
   const router = useRouter();
-  const today = dashboardData.dateISO;
+  const clock = useDhakaClock();
+  const today = clock.dateKey;
   const { repository, createReadiness, startSession } = useTrainingRepository();
   const [badmintonGames, setBadmintonGames] = useState(1);
   const [energy, setEnergy] = useState<"low" | "normal" | "high">("normal");
   const [soreness, setSoreness] = useState(2);
   const [sleepHours, setSleepHours] = useState(7);
   const [readinessNote, setReadinessNote] = useState("");
+  if (!clock.hydrated) {
+    return (
+      <AppShell>
+        <div className="px-4 pt-5">
+          <p className="display text-sm text-suii-gold">Project SUIII</p>
+          <h1 className="display text-6xl leading-none text-white">Train</h1>
+          <p className="mt-1 text-sm text-suii-muted">Loading Dhaka date</p>
+        </div>
+      </AppShell>
+    );
+  }
   const activeSession = repository.getActiveSession();
   const workout = activeSession ? repository.getWorkoutDefinition(activeSession.workoutDefinitionId) : getWorkoutForDate(today);
   const history = repository.getSessionHistory();
@@ -28,7 +40,7 @@ export function TrainDashboard() {
   const recent = history.find((session) => session.status === "completed" || session.status === "partial");
 
   const handleStart = (adjustmentKind = adjustment?.kind) => {
-    if (!workout) return;
+    if (!workout || !today) return;
     const id = startSession(today, workout.id, readiness, adjustmentKind);
     if (id) router.push(`/train/session/${id}`);
   };
@@ -40,7 +52,7 @@ export function TrainDashboard() {
           <div>
             <p className="display text-sm text-suii-gold">Project SUIII</p>
             <h1 className="display text-6xl leading-none text-white">Train</h1>
-            <p className="mt-1 text-sm text-suii-muted">{new Date(`${today}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</p>
+            <p className="mt-1 text-sm text-suii-muted">{today ? formatDhakaShortDate(today) : "Loading Dhaka date"}</p>
           </div>
           <Link href="/train/history" className="focus-ring rounded-full border border-white/10 bg-white/5 p-3 text-suii-lime" aria-label="Workout history">
             <History className="size-6" aria-hidden="true" />
@@ -136,7 +148,7 @@ export function TrainDashboard() {
           <h2 className="display text-2xl text-white">Weekly Schedule</h2>
           <div className="mt-3 grid gap-2">
             {repository.getWeeklySchedule().map((entry) => {
-              const state = entry.dayName === new Date(`${today}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" }) ? "current" : entry.category === "rest" ? "rest" : "scheduled";
+              const state = today && entry.dayName === getWeekdayName(today) ? "current" : entry.category === "rest" ? "rest" : "scheduled";
               return (
                 <div key={entry.id} className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
                   <div>

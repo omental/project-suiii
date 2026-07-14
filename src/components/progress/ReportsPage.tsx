@@ -4,6 +4,7 @@ import { Download } from "lucide-react";
 import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { reportDownloadUrl, requestProgressReport } from "@/lib/apiClient";
+import { addDays } from "@/lib/dhakaClock";
 import { todayISO } from "@/lib/progressAnalytics";
 
 export function ReportsPage() {
@@ -11,10 +12,9 @@ export function ReportsPage() {
   const [download, setDownload] = useState<string | null>(null);
   async function generate(kind: "weekly" | "monthly") {
     const end = todayISO();
-    const start = new Date(`${end}T12:00:00`);
-    start.setDate(start.getDate() - (kind === "weekly" ? 6 : 27));
+    const start = addDays(end, kind === "weekly" ? -6 : -27);
     try {
-      const report = await requestProgressReport(kind, start.toISOString().slice(0, 10), end);
+      const report = await requestProgressReport(kind, start, end);
       setDownload(reportDownloadUrl(report.id));
       setMessage(`${kind} report generated. Authenticated download is ready.`);
     } catch (error) {

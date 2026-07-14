@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TodayDashboard } from "@/components/TodayDashboard";
 import { FormGuidePage } from "@/components/training/FormGuidePage";
 import { TrainDashboard } from "@/components/training/TrainDashboard";
@@ -22,9 +22,15 @@ vi.mock("next/navigation", async () => {
 
 describe("Phase 3 training flow", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-07-13T23:30:00.000Z"));
     resetTrainingStateForTests();
     resetNutritionStateForTests();
     push.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders the Train dashboard, schedule, readiness and real start action", () => {
@@ -47,7 +53,7 @@ describe("Phase 3 training flow", () => {
   });
 
   it("logs a set and opens the absolute rest timer state", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const state = createWorkoutSession(defaultPhase3TrainingState, "2026-07-14", "full-body-a", null);
     writeTrainingState(state);
     render(<WorkoutPlayer sessionId={state.activeSessionId!} />);

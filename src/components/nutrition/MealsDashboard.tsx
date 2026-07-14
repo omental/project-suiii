@@ -7,22 +7,31 @@ import { NutritionBars } from "@/components/nutrition/NutritionBars";
 import { MealCard } from "@/components/nutrition/MealCard";
 import { NutritionHeader } from "@/components/nutrition/NutritionHeader";
 import { getPlanDay } from "@/data/nutrition";
+import { selectNextDashboardAction } from "@/lib/dashboardSelectors";
+import { useDhakaClock } from "@/lib/dhakaClock";
 import { clampPercent, formatDateLabel, nutritionText } from "@/lib/format";
 import { mealPlannedNutrition, roundNutrition } from "@/lib/nutritionCalc";
 import { useNutritionRepository } from "@/hooks/useNutritionRepository";
-
-const todayDate = "2026-07-14";
+import { useTrainingRepository } from "@/hooks/useTrainingRepository";
 
 export function MealsDashboard() {
   const { state, repository } = useNutritionRepository();
+  const training = useTrainingRepository();
+  const clock = useDhakaClock();
+  if (!clock.hydrated) {
+    return (
+      <AppShell>
+        <NutritionHeader title="Today's Meals" subtitle="Loading Dhaka date" />
+      </AppShell>
+    );
+  }
+  const todayDate = clock.dateKey;
   const day = getPlanDay(todayDate);
   const summary = repository.getDailyNutritionSummary(todayDate);
   const consumed = roundNutrition(summary.consumed);
-  const nextMeal = day.meals.find((meal) => {
-    const status = repository.getMealStatus(todayDate, meal.id);
-    return status === "up_next" || status === "in_progress";
-  }) ?? day.meals[0];
-  const nextNutrition = roundNutrition(mealPlannedNutrition(nextMeal));
+  const nextAction = selectNextDashboardAction(todayDate, clock.parts ? clock.parts.hour * 60 + clock.parts.minute : 0, state, training.state);
+  const nextMeal = day.meals.find((meal) => meal.id === nextAction.id) ?? day.meals[0];
+  const nextNutrition = nextAction.type === "meal" ? roundNutrition(mealPlannedNutrition(nextMeal)) : null;
 
   return (
     <AppShell>
@@ -62,13 +71,17 @@ export function MealsDashboard() {
         </section>
 
         <section className="card border-suii-lime/70 p-4" aria-labelledby="next-meal-title">
-          <p className="display text-lg text-suii-lime">Next · {nextMeal.time}</p>
-          <h2 id="next-meal-title" className="display text-3xl text-white">{nextMeal.name}</h2>
-          <p className="mt-1 text-sm font-semibold text-suii-muted">{nextMeal.ingredients.map((item) => item.foodId).slice(0, 3).join(" · ")}</p>
-          <p className="mt-2 text-sm font-black uppercase text-white">{nutritionText(nextNutrition)}</p>
-          <Link href={`/meals/${todayDate}/${nextMeal.id}/weigh`} className="focus-ring mt-4 flex min-h-14 items-center justify-center rounded-2xl bg-suii-lime px-5 font-black uppercase text-black">
-            Start Weighing
-          </Link>
+          <p className="display text-lg text-suii-lime">{nextAction.label} · {nextAction.time}</p>
+          <h2 id="next-meal-title" className="display text-3xl text-white">{nextAction.title}</h2>
+          <p className="mt-1 text-sm font-semibold text-suii-muted">
+            {nextAction.type === "meal" ? nextMeal.ingredients.map((item) => item.foodId).slice(0, 3).join(" · ") : nextAction.ingredient}
+          </p>
+          {nextNutrition ? <p className="mt-2 text-sm font-black uppercase text-white">{nutritionText(nextNutrition)}</p> : null}
+          {nextAction.href ? (
+            <Link href={nextAction.href} className="focus-ring mt-4 flex min-h-14 items-center justify-center rounded-2xl bg-suii-lime px-5 font-black uppercase text-black">
+              {nextAction.type === "workout" ? "Start Workout" : "Start Weighing"}
+            </Link>
+          ) : null}
         </section>
 
         <section className="grid gap-3" aria-labelledby="meal-timeline-title">
