@@ -2,11 +2,13 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { TodayDashboard } from "@/components/TodayDashboard";
-import { resetLocalStateForTests } from "@/lib/localState";
+import { createInitialLogs } from "@/lib/nutritionCalc";
+import { completeMeal, defaultPhase2State, resetNutritionStateForTests, writeNutritionState } from "@/lib/nutritionRepository";
+import { getMealDefinition } from "@/data/nutrition";
 
 describe("TodayDashboard", () => {
   beforeEach(() => {
-    resetLocalStateForTests();
+    resetNutritionStateForTests();
   });
 
   it("renders the Today dashboard and transformation values", () => {
@@ -20,30 +22,23 @@ describe("TodayDashboard", () => {
     expect(screen.getByText(/35 in/i)).toBeInTheDocument();
   });
 
-  it("opens and closes the weighing interface", async () => {
-    const user = userEvent.setup();
+  it("links the next action to the Phase 2 weighing workflow", () => {
     render(<TodayDashboard />);
 
-    await user.click(screen.getByRole("button", { name: /start weighing/i }));
-    expect(screen.getByRole("dialog", { name: /pre-badminton fuel/i })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /cancel/i }));
-    expect(screen.queryByRole("dialog", { name: /pre-badminton fuel/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /start weighing/i })).toHaveAttribute(
+      "href",
+      "/meals/2026-07-14/pre-badminton/weigh"
+    );
   });
 
-  it("enters an actual banana weight, completes the meal action, and persists locally", async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<TodayDashboard />);
-
-    await user.click(screen.getByRole("button", { name: /start weighing/i }));
-    await user.type(screen.getByLabelText(/actual measured grams/i), "118");
-    await user.click(screen.getByRole("button", { name: /mark complete/i }));
-
-    expect(screen.getByText(/banana 118 g logged locally/i)).toBeInTheDocument();
-    unmount();
+  it("reflects completed meal nutrition from the shared repository", async () => {
+    const meal = getMealDefinition("2026-07-14", "pre-badminton")!;
+    const logs = createInitialLogs(meal).map((log) => ({ ...log, actualAmount: log.targetAmount, completedAt: "2026-07-14T00:00:00.000Z" }));
+    writeNutritionState(completeMeal(defaultPhase2State, "2026-07-14", meal.id, logs));
 
     render(<TodayDashboard />);
-    expect(await screen.findByText(/banana 118 g logged locally/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Pre-badminton/i)).toBeInTheDocument();
+    expect(screen.getByText(/Done/i)).toBeInTheDocument();
   });
 
   it("increments and undoes water", async () => {

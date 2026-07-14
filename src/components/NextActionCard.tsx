@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle2, ChevronRight } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { WeighingSheet } from "@/components/WeighingSheet";
 import type { MealAction } from "@/types/dashboard";
@@ -10,9 +11,10 @@ type NextActionCardProps = {
   actualGrams: number | null;
   completed: boolean;
   onComplete: (actualGrams: number) => void;
+  href?: string;
 };
 
-export function NextActionCard({ action, actualGrams, completed, onComplete }: NextActionCardProps) {
+export function NextActionCard({ action, actualGrams, completed, onComplete, href }: NextActionCardProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -38,14 +40,23 @@ export function NextActionCard({ action, actualGrams, completed, onComplete }: N
           </div>
           <ChevronRight className="hidden size-6 shrink-0 text-white min-[390px]:block" aria-hidden="true" />
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-suii-lime px-5 py-3 font-black uppercase text-black transition active:scale-[0.99]"
-        >
+        {href ? (
+          <Link
+            href={href}
+            className="focus-ring mt-4 flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-suii-lime px-5 py-3 font-black uppercase text-black transition active:scale-[0.99]"
+          >
+            Start Weighing
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-suii-lime px-5 py-3 font-black uppercase text-black transition active:scale-[0.99]"
+          >
           {completed ? <CheckCircle2 className="size-5" aria-hidden="true" /> : null}
           {completed ? "Edit Weight" : "Start Weighing"}
-        </button>
+          </button>
+        )}
       </section>
       {open ? (
         <WeighingSheet
