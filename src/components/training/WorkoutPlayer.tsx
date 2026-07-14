@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Pause, Play, TimerReset, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { getExerciseDefinition } from "@/data/training";
 import { plannedSets, remainingRestSeconds } from "@/lib/trainingCalc";
@@ -26,12 +26,50 @@ export function WorkoutPlayer({ sessionId }: { sessionId: string }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [vibrationEnabled, setVibrationEnabled] = useState(false);
+  const notifiedRestKey = useRef<string | null>(null);
   const [now, setNow] = useState(0);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
+
+  const restTimerForNotification = session?.restTimer ?? null;
+  const restRemainingForNotification = restTimerForNotification ? (now ? remainingRestSeconds(restTimerForNotification, now) : restTimerForNotification.originalSeconds) : 0;
+
+  useEffect(() => {
+    if (!restTimerForNotification || restRemainingForNotification > 0) return;
+    const key = `${restTimerForNotification.exercisePrescriptionId}-${restTimerForNotification.setNumber}-${restTimerForNotification.restEndsAt}`;
+    if (notifiedRestKey.current === key) return;
+    notifiedRestKey.current = key;
+    if (vibrationEnabled && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([120, 80, 120]);
+      } catch {
+        // Haptics are optional and must never block workout completion.
+      }
+    }
+    if (soundEnabled) {
+      try {
+        const AudioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioContextCtor) return;
+        const context = new AudioContextCtor();
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.frequency.value = 880;
+        gain.gain.value = 0.05;
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        window.setTimeout(() => {
+          oscillator.stop();
+          void context.close();
+        }, 180);
+      } catch {
+        // Browsers may require a user gesture for audio; visible timer completion remains sufficient.
+      }
+    }
+  }, [restRemainingForNotification, restTimerForNotification, soundEnabled, vibrationEnabled]);
 
   if (!session) {
     return (

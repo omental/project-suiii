@@ -4,7 +4,7 @@
 
 Tagline: **Build Your Ultimate Form**
 
-Phase 3 delivers the frontend nutrition, kitchen-scale workflow, guided workout player, rest timer and progressive-overload system. It does not include a backend, database connection, authentication, deployment, or production persistence.
+Phase 4 adds the FastAPI/PostgreSQL backend foundation, private authentication, local-data migration, offline mutation queue, and sync-status UI. Production deployment, Nginx and SSL are still reserved for a later phase.
 
 ## Phase 1 Scope
 
@@ -46,6 +46,22 @@ Phase 3 delivers the frontend nutrition, kitchen-scale workflow, guided workout 
 - Equipment-aware progression for fixed dumbbells and bands
 - Today dashboard workout integration
 
+## Phase 4 Capabilities
+
+- FastAPI backend project under `backend/`
+- PostgreSQL-only SQLAlchemy async models
+- Alembic initial migration for Phase 4 tables
+- Private email/password sign-in with Argon2 password hashing
+- Revocable opaque server sessions in HTTP-only cookies
+- CSRF token cookie plus `X-CSRF-Token` validation for state changes
+- Profile, daily tracking, meal log and workout session persistence models
+- Idempotent sync mutation endpoints and migration batches
+- Frontend API client that uses credentialed cookie transport
+- Versioned offline mutation queue
+- Local-to-server migration preview screen
+- Sync & Data screen
+- Rest timer beep/vibration completion polish
+
 ## Routes
 
 - `/` - Today dashboard
@@ -59,6 +75,9 @@ Phase 3 delivers the frontend nutrition, kitchen-scale workflow, guided workout 
 - `/train/session/[sessionId]` - Guided workout player
 - `/train/session/[sessionId]/exercise/[exerciseId]/form` - Exercise form guide
 - `/train/session/[sessionId]/complete` - Workout completion summary
+- `/sign-in` - Private account sign-in
+- `/sync/migrate` - Local-data migration flow
+- `/sync` - Sync & Data status
 
 Dates use stable `YYYY-MM-DD` strings.
 
@@ -75,16 +94,16 @@ Frontend:
 - PWA support
 - npm
 
-Backend planned for a later phase:
+Backend:
 
 - FastAPI
-- Python
+- Python 3.12+
 - SQLAlchemy 2.x async
 - Alembic migrations
 - Pydantic
 - HTTP-only cookie authentication
 
-Database planned for a later phase:
+Database:
 
 - PostgreSQL only
 - Required database name: `suii`
@@ -113,6 +132,15 @@ npm run test
 npm run build
 ```
 
+Backend:
+
+```bash
+cd backend
+pip install -e ".[test]"
+alembic upgrade head
+pytest
+```
+
 ## PWA Notes
 
 Phase 1 includes `public/manifest.webmanifest`, mobile metadata, theme colour, standalone display mode, portrait orientation preference, and placeholder icons.
@@ -121,7 +149,7 @@ Full installability will require HTTPS in production and a correctly configured 
 
 ## Local Mock-State Limitations
 
-Water increments, cigarette increments, nutrition logs, weighing sessions, substitutions, skipped meals, completed meals, workout sessions, readiness checks, rest timers, set logs, feedback and training history are stored in browser local storage only. This data is disposable frontend state and is not saved to PostgreSQL.
+Water increments, cigarette increments, nutrition logs, weighing sessions, substitutions, skipped meals, completed meals, workout sessions, readiness checks, rest timers, set logs, feedback and training history still work locally first. Phase 4 adds migration and sync adapters so this state can be uploaded to the private PostgreSQL backend after sign-in.
 
 The local repositories are versioned. Phase 2 migrates preserved Phase 1 water, cigarette, timeline, and weighing values where possible. Phase 3 stores training state separately under a versioned key and falls back to safe defaults when local data is malformed.
 
@@ -224,6 +252,24 @@ Recommendations are deterministic and review-only. If all working sets reach the
 
 Project SUIII does not diagnose injuries or medical conditions. Readiness red flags such as sharp pain, dizziness, chest pain or unusual breathlessness produce calm stop-and-seek-assessment language. Training to failure is not required.
 
+## Phase 4 Backend
+
+Backend files live in `backend/`. Application startup does not create tables; use Alembic migrations. The initial schema includes:
+
+- `users`
+- `user_sessions`
+- `user_profiles`
+- `daily_tracking`
+- `meal_logs`
+- `workout_sessions`
+- `sync_mutations`
+- `sync_devices`
+- `migration_batches`
+
+All user-owned records include `user_id` scoping. Meal and workout logs store versioned frontend domain payloads in PostgreSQL JSONB and use optimistic integer versions. Sync mutations are idempotent by `user_id + client_mutation_id`.
+
+Authentication uses private sign-in only. There is no public registration route. Session tokens are opaque random values stored only in secure HTTP-only cookies and stored in the database as hashes. CSRF protection uses a separate token sent by the frontend in `X-CSRF-Token`.
+
 ## Environment Variables
 
 Use `.env.example` as the safe template for future phases. Do not commit real credentials.
@@ -251,14 +297,14 @@ Phase 3:
 
 Phase 4:
 
-- FastAPI application
-- PostgreSQL database named `suii`
-- SQLAlchemy models
-- Alembic migrations
-- Authentication
-- API integration
+- FastAPI application - implemented
+- PostgreSQL database named `suii` - implemented
+- SQLAlchemy models - implemented
+- Alembic migrations - implemented
+- Authentication - implemented
+- API integration - implemented
 
-Recommended Phase 4 starting point: introduce FastAPI with SQLAlchemy 2.x async models that mirror the local nutrition and training repositories while preserving PostgreSQL database name `suii`.
+Recommended Phase 5 starting point: persist weight, waist, progress photos, weekly reports and richer recovery metrics through the Phase 4 sync layer.
 
 Phase 5:
 
