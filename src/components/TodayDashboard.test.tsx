@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { TodayDashboard } from "@/components/TodayDashboard";
 import { createInitialLogs } from "@/lib/nutritionCalc";
 import { completeMeal, defaultPhase2State, resetNutritionStateForTests, writeNutritionState } from "@/lib/nutritionRepository";
+import { resetTrainingStateForTests } from "@/lib/trainingRepository";
 import { getMealDefinition } from "@/data/nutrition";
 
 describe("TodayDashboard", () => {
   beforeEach(() => {
     resetNutritionStateForTests();
+    resetTrainingStateForTests();
   });
 
   it("renders the Today dashboard and transformation values", () => {
@@ -68,15 +70,10 @@ describe("TodayDashboard", () => {
     expect(undo).toBeDisabled();
   });
 
-  it("opens and closes the workout preview dialog", async () => {
-    const user = userEvent.setup();
+  it("links the workout preview to the Phase 3 Train flow", () => {
     render(<TodayDashboard />);
 
-    await user.click(screen.getByRole("button", { name: /start workout/i }));
-    expect(screen.getByRole("dialog", { name: /full body a/i })).toBeInTheDocument();
-    expect(screen.getByText(/the guided workout player arrives in phase 2/i)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^close$/i }));
-    expect(screen.queryByRole("dialog", { name: /full body a/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Shoulder Care/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /start workout/i })).toHaveAttribute("href", "/train");
   });
 });

@@ -1,11 +1,12 @@
 "use client";
 
 import { Dumbbell } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { Dialog } from "@/components/Dialog";
 import type { WorkoutSummary } from "@/types/dashboard";
 
-export function WorkoutPreviewCard({ workout }: { workout: WorkoutSummary }) {
+export function WorkoutPreviewCard({ workout, href, ctaLabel = "Start Workout" }: { workout: WorkoutSummary; href?: string; ctaLabel?: string }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -35,13 +36,19 @@ export function WorkoutPreviewCard({ workout }: { workout: WorkoutSummary }) {
               <p className="mt-1 text-lg font-black uppercase text-white">{item.label}</p>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="focus-ring rounded-xl bg-suii-lime px-3 font-black uppercase text-black"
-          >
-            Start Workout
-          </button>
+          {href ? (
+            <Link href={href} className="focus-ring grid min-h-12 place-items-center rounded-xl bg-suii-lime px-3 text-center font-black uppercase text-black">
+              {ctaLabel}
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              className="focus-ring rounded-xl bg-suii-lime px-3 font-black uppercase text-black"
+            >
+              {ctaLabel}
+            </button>
+          )}
         </div>
       </section>
       <Dialog

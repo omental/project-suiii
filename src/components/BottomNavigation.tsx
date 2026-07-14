@@ -8,7 +8,7 @@ import { useState } from "react";
 const items = [
   { label: "Today", icon: Home, href: "/", enabled: true },
   { label: "Meals", icon: Soup, href: "/meals", enabled: true },
-  { label: "Train", icon: Dumbbell, href: "/train", enabled: false },
+  { label: "Train", icon: Dumbbell, href: "/train", enabled: true },
   { label: "Progress", icon: TrendingUp, href: "/progress", enabled: false },
   { label: "More", icon: MoreHorizontal, href: "/more", enabled: false }
 ];

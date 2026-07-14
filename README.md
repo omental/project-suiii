@@ -4,7 +4,7 @@
 
 Tagline: **Build Your Ultimate Form**
 
-Phase 2 delivers the frontend nutrition and kitchen-scale workflow. It does not include a backend, database connection, authentication, deployment, or production persistence.
+Phase 3 delivers the frontend nutrition, kitchen-scale workflow, guided workout player, rest timer and progressive-overload system. It does not include a backend, database connection, authentication, deployment, or production persistence.
 
 ## Phase 1 Scope
 
@@ -33,6 +33,19 @@ Phase 2 delivers the frontend nutrition and kitchen-scale workflow. It does not 
 - Local nutrition history
 - Today dashboard integration
 
+## Phase 3 Capabilities
+
+- Train dashboard with weekly schedule and readiness status
+- Guided workout player with hidden app navigation
+- Set, repetition, resistance and RIR logging
+- Absolute timestamp rest timer using `restEndsAt`
+- Pause, resume, save and exit, partial-session handling
+- Structured form guides for the Phase 3 exercise catalogue
+- Workout completion summary with effort and soreness feedback
+- Training history, accessible trend values and progression recommendations
+- Equipment-aware progression for fixed dumbbells and bands
+- Today dashboard workout integration
+
 ## Routes
 
 - `/` - Today dashboard
@@ -41,6 +54,11 @@ Phase 2 delivers the frontend nutrition and kitchen-scale workflow. It does not 
 - `/meals/[date]/[mealId]` - Meal detail
 - `/meals/[date]/[mealId]/weigh` - Kitchen-scale workflow
 - `/meals/[date]/[mealId]/complete` - Meal completion summary
+- `/train` - Train dashboard
+- `/train/history` - Training history and progression
+- `/train/session/[sessionId]` - Guided workout player
+- `/train/session/[sessionId]/exercise/[exerciseId]/form` - Exercise form guide
+- `/train/session/[sessionId]/complete` - Workout completion summary
 
 Dates use stable `YYYY-MM-DD` strings.
 
@@ -103,9 +121,9 @@ Full installability will require HTTPS in production and a correctly configured 
 
 ## Local Mock-State Limitations
 
-Water increments, cigarette increments, nutrition logs, weighing sessions, substitutions, skipped meals, and completed meals are stored in browser local storage only. This data is disposable frontend state and is not saved to PostgreSQL.
+Water increments, cigarette increments, nutrition logs, weighing sessions, substitutions, skipped meals, completed meals, workout sessions, readiness checks, rest timers, set logs, feedback and training history are stored in browser local storage only. This data is disposable frontend state and is not saved to PostgreSQL.
 
-The local repository is versioned. Phase 2 migrates preserved Phase 1 water, cigarette, timeline, and weighing values where possible. Malformed local data falls back to safe defaults.
+The local repositories are versioned. Phase 2 migrates preserved Phase 1 water, cigarette, timeline, and weighing values where possible. Phase 3 stores training state separately under a versioned key and falls back to safe defaults when local data is malformed.
 
 ## Data Model
 
@@ -126,6 +144,26 @@ Core nutrition concepts are centralized in TypeScript:
 - `NutritionTargets`
 
 Food definitions live in one catalogue and meal logs reference stable IDs instead of duplicating full food definitions.
+
+Training concepts are centralized in TypeScript:
+
+- `EquipmentType`
+- `ResistanceSelection`
+- `ExerciseDefinition`
+- `ExercisePrescription`
+- `WorkoutDefinition`
+- `WorkoutScheduleEntry`
+- `WorkoutSession`
+- `ExerciseSession`
+- `SetLog`
+- `RestTimerState`
+- `ReadinessCheckIn`
+- `SessionAdjustment`
+- `ExerciseFormGuide`
+- `SessionFeedback`
+- `ProgressionRecommendation`
+
+Workout logs reference stable exercise and workout IDs instead of duplicating the full exercise catalogue.
 
 ## Weighing Rules
 
@@ -152,6 +190,40 @@ Daily totals are derived from completed meal logs only. Skipped meals and skippe
 
 Nutrition values are planning estimates. Packaged-food labels and preparation methods may produce different values.
 
+## Phase 3 Workout Programme
+
+- Saturday: Full Body A
+- Sunday: Mobility
+- Monday: Full Body B
+- Tuesday: Shoulder Care
+- Wednesday: Full Body C
+- Thursday: Active Recovery
+- Friday: Complete Rest
+
+Available equipment is fixed to bodyweight, one or paired 5 kg dumbbells, one or paired 7.5 kg dumbbells, resistance bands, mini-loop bands, mat, foam roller and chair. The app does not recommend unavailable fractional dumbbell jumps.
+
+## Timer Architecture
+
+Workout duration is derived from `startedAt`, `pausedAt`, `totalPausedDurationMs` and `completedAt`. Rest duration is derived from an absolute `restEndsAt` timestamp rather than a decrement-only counter, so refreshes and background tabs restore the remaining time more reliably. Pausing the session also freezes active rest by storing the remaining seconds, then resume writes a new `restEndsAt`.
+
+## Volume Calculation
+
+External-load volume is calculated only where it is meaningful:
+
+- One dumbbell: `kg * repetitions`
+- Dumbbell pair: combined pair load per repetition
+- Unilateral work counts left and right repetitions separately
+
+Bodyweight, bands, holds, mobility and stretches track repetitions, duration or completion without invented kilogram volume.
+
+## Progression Rules
+
+Recommendations are deterministic and review-only. If all working sets reach the top of a repetition range with controlled form and approximately 1-2 RIR, the app recommends adding 1-2 total repetitions, slowing tempo or using an available band when appropriate. One weaker session is treated as a repeat target. Repeated decline with high soreness recommends maintaining or reducing volume for review. Future plans are never altered silently.
+
+## Safety Limitations
+
+Project SUIII does not diagnose injuries or medical conditions. Readiness red flags such as sharp pain, dizziness, chest pain or unusual breathlessness produce calm stop-and-seek-assessment language. Training to failure is not required.
+
 ## Environment Variables
 
 Use `.env.example` as the safe template for future phases. Do not commit real credentials.
@@ -170,12 +242,12 @@ Phase 2:
 
 Phase 3:
 
-- Guided workout player
-- Sets and repetitions
-- Rest timer
-- Dumbbell and band resistance
-- Progressive overload
-- Exercise history
+- Guided workout player - implemented
+- Sets and repetitions - implemented
+- Rest timer - implemented
+- Dumbbell and band resistance - implemented
+- Progressive overload - implemented
+- Exercise history - implemented
 
 Phase 4:
 
@@ -185,6 +257,8 @@ Phase 4:
 - Alembic migrations
 - Authentication
 - API integration
+
+Recommended Phase 4 starting point: introduce FastAPI with SQLAlchemy 2.x async models that mirror the local nutrition and training repositories while preserving PostgreSQL database name `suii`.
 
 Phase 5:
 
