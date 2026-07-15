@@ -4,9 +4,9 @@ import { CheckCircle2, CloudUpload, Eye, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { apiRequest } from "@/lib/apiClient";
+import { apiRequest, fetchMe } from "@/lib/apiClient";
 import { downloadDeviceDataBackup } from "@/lib/deviceData";
-import { buildMigrationMutations, buildMigrationPreview, completeConfirmedMigrationRecords } from "@/lib/localMigration";
+import { buildMigrationMutations, buildMigrationPreview, completeConfirmedMigrationRecords, hasCompletedMigration, writeMigrationCompletionMarker } from "@/lib/localMigration";
 import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
 import type { MigrationPreview, MigrationResponse } from "@/types/sync";
 
@@ -19,11 +19,20 @@ export function LocalMigrationPage() {
   const [completed, setCompleted] = useState(false);
   const [partial, setPartial] = useState(false);
   const [exportMessage, setExportMessage] = useState("");
+  const [accountId, setAccountId] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const checkedEmptyRef = useRef(false);
 
   useEffect(() => {
     // Local migration data is only available after hydration.
+    const queue = readSyncQueue();
+    fetchMe().then((user) => {
+      setAccountId(user.id);
+      if (hasCompletedMigration(user.id, queue.deviceId)) {
+        router.replace("/");
+        router.refresh();
+      }
+    }).catch(() => undefined);
     const currentPreview = buildMigrationPreview();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPreview(currentPreview);
@@ -78,6 +87,8 @@ export function LocalMigrationPage() {
         return;
       }
       writeSyncQueue({ ...queue, lastSyncAt: new Date().toISOString(), recentActivity: ["Local import complete", ...queue.recentActivity].slice(0, 5) });
+      const markerAccountId = accountId ?? (await fetchMe()).id;
+      writeMigrationCompletionMarker(markerAccountId, queue.deviceId, response.summary);
       setCompleted(true);
       setStatus(`Import complete · ${migrated} records migrated`);
       continueToDashboard();

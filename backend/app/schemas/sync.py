@@ -11,8 +11,8 @@ EntityType = Literal["daily_tracking", "meal_log", "workout_session", "profile",
 
 class DailyTrackingUpsert(BaseModel):
     tracking_date: date
-    water_ml: int = Field(ge=0, le=10000)
-    cigarettes: int = Field(ge=0, le=100)
+    water_ml: int | None = Field(default=None, ge=0, le=10000)
+    cigarettes: int | None = Field(default=None, ge=0, le=100)
     sleep_minutes: int | None = Field(default=None, ge=0, le=1440)
     badminton_games: int | None = Field(default=None, ge=0, le=10)
     energy: str | None = None
@@ -45,7 +45,7 @@ class MutationResult(BaseModel):
     mutation_id: UUID
     entity_type: EntityType
     entity_id: str
-    status: Literal["applied", "duplicate", "conflict"]
+    status: Literal["applied", "duplicate", "already_exists", "server_newer", "conflict", "rejected"]
     server_version: int | None = None
     payload: dict[str, Any] = {}
 
@@ -56,6 +56,21 @@ class SyncPushRequest(BaseModel):
 
 class SyncPushResponse(BaseModel):
     results: list[MutationResult]
+    server_time: datetime
+
+
+class SyncPullRecord(BaseModel):
+    entity_type: EntityType
+    entity_id: str
+    client_record_id: str
+    server_version: int
+    server_updated_at: datetime
+    deleted_at: datetime | None = None
+    payload: dict[str, Any]
+
+
+class SyncPullResponse(BaseModel):
+    records: list[SyncPullRecord]
     server_time: datetime
 
 

@@ -3,13 +3,14 @@
 import { Cloud, Database, Dumbbell, Droplets, LogOut, RefreshCcw, Settings, Shield, Target, Utensils } from "lucide-react";
 import Link from "next/link";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { logout } from "@/lib/apiClient";
+import { ApiError, apiRequest, fetchSyncStatus, logout, NetworkError } from "@/lib/apiClient";
 import { downloadDeviceDataBackup, getDeviceDataSummary, type DeviceCategorySummary, type DeviceDataSummary } from "@/lib/deviceData";
 import { buildMigrationPreview } from "@/lib/localMigration";
-import { readSyncQueue } from "@/lib/syncQueue";
-import type { MigrationPreview } from "@/types/sync";
+import { mergePulledRecords } from "@/lib/syncMerge";
+import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
+import type { MigrationPreview, SyncPullResponse, SyncPushResponse } from "@/types/sync";
 
 export function SyncDataPage() {
   const [preview, setPreview] = useState<MigrationPreview>({ meal_logs: 0, workout_sessions: 0, daily_check_ins: 0, sets: 0, date_range: "No local records", total_records: 0 });
@@ -18,6 +19,9 @@ export function SyncDataPage() {
   const [reviewing, setReviewing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState("");
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "complete" | "attention" | "offline" | "server_unavailable">("idle");
+  const [syncMessage, setSyncMessage] = useState("");
+  const inFlightSyncRef = useRef(false);
 
   useEffect(() => {
     // Local sync queue data is only available after hydration.
@@ -38,6 +42,73 @@ export function SyncDataPage() {
       refreshDeviceData();
     } catch {
       setExportMessage("Export failed. Your local data was not changed.");
+    }
+  };
+
+  const syncNow = async () => {
+    if (inFlightSyncRef.current) return;
+    const currentQueue = readSyncQueue();
+    inFlightSyncRef.current = true;
+    setSyncState("syncing");
+    setSyncMessage("Syncing...");
+    try {
+      const pending = currentQueue.pending;
+      let uploaded = 0;
+      let downloaded = 0;
+      let conflicts = 0;
+      let rejected = 0;
+      let nextPending = pending;
+      let nextFailed = currentQueue.failed;
+      if (pending.length > 0) {
+        const push = await apiRequest<SyncPushResponse>("/sync/push", {
+          method: "POST",
+          body: JSON.stringify({ mutations: pending })
+        });
+        const isConfirmed = (status: string) => status === "applied" || status === "duplicate" || status === "already_exists";
+        uploaded = push.results.filter((result) => isConfirmed(result.status)).length;
+        conflicts = push.results.filter((result) => result.status === "conflict" || result.status === "server_newer").length;
+        rejected = push.results.filter((result) => result.status === "rejected").length;
+        nextPending = pending.filter((mutation, index) => {
+          const result = push.results[index];
+          return !result || !isConfirmed(result.status);
+        });
+        const failedIds = new Set(nextFailed.map((mutation) => mutation.client_mutation_id));
+        nextFailed = [...nextFailed, ...nextPending.filter((mutation) => !failedIds.has(mutation.client_mutation_id))];
+      }
+      const pull = await apiRequest<SyncPullResponse>("/sync/pull");
+      const mergeResult = mergePulledRecords(pull.records, [...nextPending, ...nextFailed]);
+      downloaded = mergeResult.downloaded;
+      const status = await fetchSyncStatus();
+      const nextQueue = {
+        ...currentQueue,
+        pending: nextPending,
+        failed: nextFailed,
+        lastSyncAt: status.last_sync_at ?? new Date().toISOString(),
+        recentActivity: [`Sync completed: ${uploaded} uploaded, ${downloaded} downloaded, ${conflicts} conflicts, ${rejected} rejected`, ...currentQueue.recentActivity].slice(0, 5)
+      };
+      writeSyncQueue(nextQueue);
+      setQueue(nextQueue);
+      setSummary(getDeviceDataSummary());
+      if (nextPending.length === 0 && conflicts === 0 && rejected === 0) {
+        setSyncState("complete");
+        setSyncMessage(uploaded > 0 ? "Sync completed" : "All caught up");
+      } else {
+        setSyncState("attention");
+        setSyncMessage("Sync needs attention");
+      }
+    } catch (error) {
+      if (error instanceof NetworkError) {
+        setSyncState("offline");
+        setSyncMessage("Offline");
+      } else if (error instanceof ApiError && [401, 409, 422].includes(error.status)) {
+        setSyncState("attention");
+        setSyncMessage("Sync needs attention");
+      } else {
+        setSyncState("server_unavailable");
+        setSyncMessage("Server unavailable");
+      }
+    } finally {
+      inFlightSyncRef.current = false;
     }
   };
 
@@ -64,12 +135,12 @@ export function SyncDataPage() {
           <div className="flex items-center gap-4">
             <Cloud className="size-20 text-suii-lime" />
             <div>
-              <h2 className="display text-3xl text-suii-lime">All Caught Up</h2>
+              <h2 className="display text-3xl text-suii-lime">{syncState === "syncing" ? "Syncing..." : syncMessage || (queue.pending.length === 0 && queue.failed.length === 0 && queue.lastSyncAt ? "All Caught Up" : "Sync Needs Attention")}</h2>
               <p className="text-suii-muted">Last synced {queue.lastSyncAt ? new Date(queue.lastSyncAt).toLocaleString() : "not yet"}</p>
               <span className="mt-2 inline-flex rounded border border-suii-lime px-3 py-1 display text-suii-lime">Online</span>
             </div>
           </div>
-          <button className="focus-ring rounded-lg border border-suii-lime px-4 py-3 display text-suii-lime">Sync Now</button>
+          <button onClick={syncNow} disabled={syncState === "syncing"} className="focus-ring rounded-lg border border-suii-lime px-4 py-3 display text-suii-lime disabled:opacity-60">Sync Now</button>
         </section>
         <section className="card mt-4 p-4">
           <p className="display text-suii-gold">Private Account</p>
@@ -78,8 +149,8 @@ export function SyncDataPage() {
           <p className="display mt-2 text-suii-gold">This device · {queue.deviceName}</p>
         </section>
         <section className="card mt-4 divide-y divide-white/10 p-4">
-          <SyncRow icon={<Utensils />} title="Meals" detail={`${preview.meal_logs} logs`} />
-          <SyncRow icon={<Dumbbell />} title="Workouts" detail={`${preview.workout_sessions} sessions · ${preview.sets} sets`} />
+          <SyncRow icon={<Utensils />} title="Meals" detail={`${summary?.categories.find((item) => item.id === "nutrition")?.total ?? 0} cached · ${preview.meal_logs} legacy`} />
+          <SyncRow icon={<Dumbbell />} title="Workouts" detail={`${summary?.categories.find((item) => item.id === "workouts")?.total ?? 0} cached · ${preview.workout_sessions} legacy`} />
           <SyncRow icon={<Droplets />} title="Daily Tracking" detail="Water · Cigarettes · Sleep" />
           <SyncRow icon={<Target />} title="Profile & Goals" detail="Weight · Waist · Targets" />
         </section>
@@ -88,7 +159,7 @@ export function SyncDataPage() {
           <div>
             <h2 className="display text-2xl text-suii-blue">Offline Ready</h2>
             <p className="text-suii-muted">You can log meals and workouts without internet. Changes upload automatically when you reconnect.</p>
-            <p className="display mt-3 text-suii-blue">{queue.pending.length} Changes Waiting</p>
+            <p className="display mt-3 text-suii-blue">{queue.pending.length} Pending Sync Changes</p>
           </div>
         </section>
         <section className="card mt-4 p-4">
@@ -97,7 +168,7 @@ export function SyncDataPage() {
         </section>
         <section className="card mt-4 divide-y divide-white/10 p-4">
           <h2 className="display pb-3 text-2xl">Device Data</h2>
-          {summary ? <p className="pb-3 text-suii-muted">{summary.totalSupportedRecords} records stored on this device · {summary.totalPendingRecords} pending import</p> : null}
+          {summary ? <p className="pb-3 text-suii-muted">{summary.totalSupportedRecords} local cached records · {summary.pendingSyncChanges} pending sync changes · {summary.legacyRecordsAwaitingImport} legacy records awaiting import</p> : null}
           <Action icon={<Database />} label="Export My Data" onClick={exportData} />
           <Action icon={<RefreshCcw />} label="Retry Failed Changes" muted />
           <Action icon={<Database />} label="Review Device Data" onClick={() => { refreshDeviceData(); setReviewing(true); }} />
@@ -109,8 +180,11 @@ export function SyncDataPage() {
             <h2 className="display text-2xl">Device Overview</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Tile label="Records" value={summary.totalSupportedRecords} />
-              <Tile label="Pending" value={summary.totalPendingRecords} />
-              <Tile label="Last Import" value={summary.lastSuccessfulImportAt ? new Date(summary.lastSuccessfulImportAt).toLocaleDateString() : "Not yet"} />
+              <Tile label="Pending Sync" value={summary.pendingSyncChanges} />
+              <Tile label="Legacy Import" value={summary.legacyRecordsAwaitingImport} />
+              <Tile label="Migration" value={summary.migrationStatus.replace("_", " ")} />
+              <Tile label="Last Sync" value={summary.lastSuccessfulImportAt ? new Date(summary.lastSuccessfulImportAt).toLocaleDateString() : "Not yet"} />
+              <Tile label="Attention" value={summary.conflictsNeedingAttention} />
               <Tile label="Device" value={summary.deviceIdDisplay} />
             </div>
             <p className="mt-3 text-sm text-suii-muted">Your backup stays on your device unless you choose where to save it. Exporting does not delete your data.</p>

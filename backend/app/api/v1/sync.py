@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUserSession
 from app.core.security import utc_now
 from app.db.session import get_db
-from app.schemas.sync import MigrationRequest, MigrationResponse, SyncPushRequest, SyncPushResponse, SyncStatusResponse
+from app.schemas.sync import MigrationRequest, MigrationResponse, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncStatusResponse
 from app.services.sync_service import SyncService, SyncValidationError
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -37,6 +37,12 @@ async def push(payload: SyncPushRequest, current: CurrentUserSession, db: Annota
         await db.rollback()
         raise HTTPException(status_code=500, detail="Sync failed. Please try again shortly.") from exc
     return SyncPushResponse(results=results, server_time=utc_now())
+
+
+@router.get("/pull", response_model=SyncPullResponse)
+async def pull(current: CurrentUserSession, db: Annotated[AsyncSession, Depends(get_db)]) -> SyncPullResponse:
+    user, _ = current
+    return await SyncService(db).pull_server_state(user.id)
 
 
 @router.post("/migrate", response_model=MigrationResponse)

@@ -10,6 +10,17 @@ export type SyncMutation = {
   created_at: string;
 };
 
+export type SyncMutationResultStatus = "applied" | "duplicate" | "already_exists" | "server_newer" | "conflict" | "rejected";
+
+export type SyncMutationResult = {
+  mutation_id: string;
+  entity_type: SyncEntityType;
+  entity_id: string;
+  status: SyncMutationResultStatus;
+  server_version?: number | null;
+  payload: Record<string, unknown>;
+};
+
 export type SyncQueueState = {
   version: 4;
   deviceId: string;
@@ -33,9 +44,16 @@ export type MigrationPreview = {
 export type MigrationRejectedItem = {
   record_type: SyncEntityType;
   client_record_id: string;
-  status: "rejected";
+  status: "rejected" | "server_newer" | "conflict";
   code: string;
   message: string;
+};
+
+export type MigrationOutcomeItem = {
+  record_type: SyncEntityType;
+  client_record_id: string;
+  status: "migrated" | "already_exists" | "server_newer" | "conflict" | "rejected";
+  code?: string;
 };
 
 export type MigrationResponse = {
@@ -47,7 +65,28 @@ export type MigrationResponse = {
   error_records: number;
   summary: MigrationPreview & {
     rejected_items?: MigrationRejectedItem[];
+    outcome_items?: MigrationOutcomeItem[];
   } & Record<string, unknown>;
+};
+
+export type SyncPushResponse = {
+  results: SyncMutationResult[];
+  server_time: string;
+};
+
+export type SyncPullRecord = {
+  entity_type: SyncEntityType;
+  entity_id: string;
+  client_record_id: string;
+  server_version: number;
+  server_updated_at: string;
+  deleted_at?: string | null;
+  payload: Record<string, unknown>;
+};
+
+export type SyncPullResponse = {
+  records: SyncPullRecord[];
+  server_time: string;
 };
 
 export type AuthUser = {

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import type React from "react";
 import { useState } from "react";
 import { login, userFacingApiError } from "@/lib/apiClient";
+import { buildMigrationPreview, hasCompletedMigration } from "@/lib/localMigration";
+import { readSyncQueue } from "@/lib/syncQueue";
 
 export function SignInPage() {
   const router = useRouter();
@@ -19,8 +21,10 @@ export function SignInPage() {
     setBusy(true);
     setError("");
     try {
-      await login(email, password, remember, "This device");
-      router.push("/sync/migrate");
+      const response = await login(email, password, remember, "This device");
+      const queue = readSyncQueue();
+      const needsMigration = !hasCompletedMigration(response.user.id, queue.deviceId) && buildMigrationPreview().total_records > 0;
+      router.push(needsMigration ? "/sync/migrate" : "/");
     } catch (error) {
       setError(userFacingApiError(error));
     } finally {

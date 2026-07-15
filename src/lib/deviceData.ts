@@ -1,4 +1,4 @@
-import { buildMigrationPreview } from "@/lib/localMigration";
+import { buildMigrationPreview, readMigrationCompletionMarker } from "@/lib/localMigration";
 import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
 
 const phase1Key = "project-suiii:phase-1-dashboard";
@@ -43,6 +43,10 @@ export type DeviceDataSummary = {
   deviceIdDisplay: string;
   deviceName: string;
   lastSuccessfulImportAt: string | null;
+  legacyRecordsAwaitingImport: number;
+  pendingSyncChanges: number;
+  migrationStatus: "completed" | "not_required" | "pending";
+  conflictsNeedingAttention: number;
   lastExportAt: string | null;
   photoBinaryIncluded: false;
   photoMetadataCount: number;
@@ -92,7 +96,7 @@ function category(id: DeviceCategoryId, name: string, records: DeviceRecordSumma
     id,
     name,
     total: records.length,
-    pending: records.filter((record) => record.status === "pending" || record.status === "local").length,
+    pending: records.filter((record) => record.status === "pending").length,
     imported: records.filter((record) => record.status === "imported").length,
     rejected: records.filter((record) => record.status === "rejected" || record.status === "needs_attention").length,
     earliestDate: dates[0] ?? null,
@@ -124,7 +128,7 @@ function summarizeMeal(item: Record<string, unknown>, index: number): DeviceReco
     title: `${date} · ${asString(item.mealDefinitionId) ?? "Meal"}`,
     subtitle: `${asString(item.status) ?? "saved"}${asString(item.completedAt) ? ` · completed ${asString(item.completedAt)}` : ""}`,
     date,
-    status: "pending",
+    status: "local",
     technicalDetails: { id, mealDefinitionId: item.mealDefinitionId, status: item.status, startedAt: item.startedAt, completedAt: item.completedAt }
   };
 }
@@ -141,7 +145,7 @@ function summarizeWorkout(item: Record<string, unknown>, index: number): DeviceR
     title: `${date} · ${asString(item.workoutDefinitionId) ?? "Workout"}`,
     subtitle: `${sets} sets · ${asString(item.status) ?? "saved"}`,
     date,
-    status: "pending",
+    status: "local",
     technicalDetails: { id, workoutDefinitionId: item.workoutDefinitionId, status: item.status, startedAt: item.startedAt, completedAt: item.completedAt }
   };
 }
@@ -154,7 +158,7 @@ function summarizeReadiness(item: Record<string, unknown>, fallbackDate: string)
     title: `${date} · Daily check-in`,
     subtitle: `Energy ${asString(item.energy) ?? "not set"} · soreness ${String(item.soreness ?? "not set")}`,
     date,
-    status: "pending",
+    status: "local",
     technicalDetails: { id: item.id, badmintonGames: item.badmintonGames, energy: item.energy, soreness: item.soreness, sleepHours: item.sleepHours }
   };
 }
@@ -169,7 +173,7 @@ function summarizeMeasurement(item: Record<string, unknown>, index: number): Dev
     title: `${date} · Measurement`,
     subtitle: `Weight ${String(item.weightKg ?? "not logged")} kg · Waist ${String(item.waistIn ?? "not logged")} in`,
     date,
-    status: "pending",
+    status: "local",
     technicalDetails: { id, clientRecordId: item.clientRecordId, measuredAt: item.measuredAt, localDate: item.localDate, note: item.note }
   };
 }
@@ -184,7 +188,7 @@ function summarizeCheckIn(item: Record<string, unknown>, index: number): DeviceR
     title: `Week ${String(item.weekNumber ?? "?")} · ${date}`,
     subtitle: `${asString(item.status) ?? "saved"} · energy ${asString(item.energy) ?? "not set"}`,
     date,
-    status: "pending",
+    status: "local",
     technicalDetails: { id, clientRecordId: item.clientRecordId, status: item.status, completedAt: item.completedAt, measurementId: item.measurementId }
   };
 }
@@ -252,10 +256,13 @@ export function getDeviceDataSummary(): DeviceDataSummary {
   ];
   categories.forEach((item) => malformedRecords.push(...item.records.filter((record) => record.status === "needs_attention")));
   const preview = buildMigrationPreview();
+  const marker = readMigrationCompletionMarker(null, queue.deviceId);
+  const pendingSyncChanges = queue.pending.length + queue.failed.length;
+  const conflictsNeedingAttention = queue.failed.length + malformedRecords.length;
   return {
     categories,
     totalSupportedRecords: categories.reduce((total, item) => total + item.total, 0),
-    totalPendingRecords: preview.total_records + queue.pending.length + queue.failed.length,
+    totalPendingRecords: preview.total_records + pendingSyncChanges,
     schemaVersions: {
       dashboard: safeVersion(phase1),
       nutrition: safeVersion(nutrition),
@@ -266,6 +273,10 @@ export function getDeviceDataSummary(): DeviceDataSummary {
     deviceIdDisplay: abbreviateDeviceId(queue.deviceId),
     deviceName: queue.deviceName,
     lastSuccessfulImportAt: queue.lastSyncAt,
+    legacyRecordsAwaitingImport: preview.total_records,
+    pendingSyncChanges,
+    migrationStatus: marker ? "completed" : preview.total_records > 0 ? "pending" : "not_required",
+    conflictsNeedingAttention,
     lastExportAt: exportMeta.ok ? asString(exportMeta.value?.lastExportAt) : null,
     photoBinaryIncluded: false,
     photoMetadataCount: photos.length,

@@ -9,20 +9,30 @@ import { resetTrainingStateForTests } from "@/lib/trainingRepository";
 
 const replaceMock = vi.fn();
 const refreshMock = vi.fn();
+const pushRouteMock = vi.fn();
 const apiRequestMock = vi.fn();
+const loginMock = vi.fn(() => Promise.resolve({ user: { id: "user-1", email: "mubasshir@example.com", full_name: "J.M. Mubasshir Rahman", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" }));
 
 vi.mock("next/navigation", async () => {
   const actual = await vi.importActual<typeof import("next/navigation")>("next/navigation");
   return {
     ...actual,
     usePathname: () => "/sync",
-    useRouter: () => ({ push: vi.fn(), replace: replaceMock, refresh: refreshMock })
+    useRouter: () => ({ push: pushRouteMock, replace: replaceMock, refresh: refreshMock })
   };
 });
 
 vi.mock("@/lib/apiClient", () => ({
+  ApiError: class ApiError extends Error {
+    constructor(public status: number, message: string) {
+      super(message);
+    }
+  },
+  NetworkError: class NetworkError extends Error {},
   apiRequest: (...args: unknown[]) => apiRequestMock(...args),
-  login: vi.fn(),
+  fetchMe: vi.fn(() => Promise.resolve({ id: "user-1", email: "mubasshir@example.com", full_name: "J.M. Mubasshir Rahman", timezone: "Asia/Dhaka", is_active: true, is_admin: false })),
+  fetchSyncStatus: vi.fn(() => Promise.resolve({ online: true, pending_mutations: 0, last_sync_at: "2026-07-15T10:00:00.000Z", device_name: "This device", recent_activity: [] })),
+  login: (...args: unknown[]) => loginMock(...args),
   logout: vi.fn(),
   userFacingApiError: () => "Something went wrong. Please try again."
 }));
@@ -56,7 +66,8 @@ function seedMigrationData() {
         ingredientLogs: [],
         startedAt: "2026-07-15T06:08:30.092Z",
         completedAt: "2026-07-15T06:08:32.205Z",
-        updatedAt: "2026-07-15T06:08:32.205Z"
+        updatedAt: "2026-07-15T06:08:32.205Z",
+        pendingMigration: true
       }
     },
     weighingSessions: {}
@@ -71,12 +82,13 @@ function seedMigrationData() {
         status: "completed",
         startedAt: "2026-07-15T07:00:00.000Z",
         completedAt: "2026-07-15T08:00:00.000Z",
-        exerciseSessions: []
+        exerciseSessions: [],
+        pendingMigration: true
       }
     },
     activeSessionId: null,
     readinessByDate: {
-      "2026-07-15": { id: "readiness-2026-07-15", date: "2026-07-15", badmintonGames: 1, energy: "normal", soreness: 2, sleepHours: 7, note: "" }
+      "2026-07-15": { id: "readiness-2026-07-15", date: "2026-07-15", badmintonGames: 1, energy: "normal", soreness: 2, sleepHours: 7, note: "", pendingMigration: true }
     },
     uncomfortableExerciseIds: []
   }));
@@ -85,6 +97,7 @@ function seedMigrationData() {
 describe("Phase 4 auth and sync screens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loginMock.mockResolvedValue({ user: { id: "user-1", email: "mubasshir@example.com", full_name: "J.M. Mubasshir Rahman", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" });
     resetSyncQueueForTests();
     resetNutritionStateForTests();
     resetTrainingStateForTests();
@@ -99,12 +112,67 @@ describe("Phase 4 auth and sync screens", () => {
   });
 
   it("summarizes local migration data and conflict policy options", async () => {
-    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a" } } }));
-    window.localStorage.setItem("project-suiii:phase-3-training", JSON.stringify({ version: 3, sessions: { s: { exerciseSessions: [{ setLogs: [{ id: "set" }] }] } }, readinessByDate: { "2026-07-14": {} } }));
+    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", pendingMigration: true } } }));
+    window.localStorage.setItem("project-suiii:phase-3-training", JSON.stringify({ version: 3, sessions: { s: { pendingMigration: true, exerciseSessions: [{ setLogs: [{ id: "set" }] }] } }, readinessByDate: { "2026-07-14": { pendingMigration: true } } }));
     render(<LocalMigrationPage />);
     expect(await screen.findByRole("heading", { name: /bring your progress/i })).toBeInTheDocument();
     expect(screen.getByText(/Keep the most recent version/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /import/i })).toBeInTheDocument();
+  });
+
+  it("does not classify ordinary cached records as legacy migration records", async () => {
+    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", date: "2026-07-15" } } }));
+    window.localStorage.setItem("project-suiii:phase-3-training", JSON.stringify({ version: 3, sessions: { s: { id: "s", date: "2026-07-15", exerciseSessions: [] } }, readinessByDate: { "2026-07-14": { date: "2026-07-14" } } }));
+
+    render(<LocalMigrationPage />);
+
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/"));
+    expect(apiRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("sends users to the dashboard after login when only normal cache exists", async () => {
+    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", date: "2026-07-15" } } }));
+    render(<SignInPage />);
+
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/"));
+  });
+
+  it("routes to migration for old legacy records without modern flags", async () => {
+    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 1, mealLogs: { a: { id: "a", date: "2026-07-15", mealDefinitionId: "pre-badminton", status: "completed" } } }));
+    render(<SignInPage />);
+
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/sync/migrate"));
+  });
+
+  it("completed migration marker is isolated by account and device", async () => {
+    window.localStorage.setItem("project-suiii:phase-4-sync-queue", JSON.stringify({ version: 4, deviceId: "device-local", deviceName: "This device", csrfToken: null, pending: [], failed: [], lastSyncAt: null, recentActivity: [] }));
+    window.localStorage.setItem("project-suiii:migration:v1:user-1:device-local", JSON.stringify({ migrationVersion: 1, completedAt: "2026-07-15T00:00:00.000Z", accountId: "user-1", deviceId: "device-local", resultSummary: {} }));
+    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", date: "2026-07-15", mealDefinitionId: "pre-badminton", status: "completed", pendingMigration: true } } }));
+    loginMock.mockResolvedValueOnce({ user: { id: "user-2", email: "other@example.com", full_name: "Other User", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" });
+    render(<SignInPage />);
+
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/sync/migrate"));
+  });
+
+  it("completed migration marker sends the same account and device to dashboard", async () => {
+    window.localStorage.setItem("project-suiii:phase-4-sync-queue", JSON.stringify({ version: 4, deviceId: "device-local", deviceName: "Renamed device", csrfToken: null, pending: [], failed: [], lastSyncAt: null, recentActivity: [] }));
+    window.localStorage.setItem("project-suiii:migration:v1:user-1:device-local", JSON.stringify({ migrationVersion: 1, completedAt: "2026-07-15T00:00:00.000Z", accountId: "user-1", deviceId: "device-local", resultSummary: {} }));
+    window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", date: "2026-07-15", mealDefinitionId: "pre-badminton", status: "completed", pendingMigration: true } } }));
+    render(<SignInPage />);
+
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/"));
   });
 
   it("renders Sync & Data status with offline queue sections", async () => {
@@ -113,6 +181,58 @@ describe("Phase 4 auth and sync screens", () => {
     expect(screen.getByText(/Offline Ready/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Meals/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Sign Out/i)).toBeInTheDocument();
+  });
+
+  it("sync now calls normal push workflow once and never calls migration", async () => {
+    window.localStorage.setItem("project-suiii:phase-4-sync-queue", JSON.stringify({
+      version: 4,
+      deviceId: "device-local",
+      deviceName: "This device",
+      csrfToken: null,
+      pending: [{ client_mutation_id: "mut-1", device_id: "device-local", entity_type: "meal_log", entity_id: "meal-1", mutation_type: "upsert", created_at: "2026-07-15T00:00:00.000Z", payload: { client_record_id: "meal-1", version: 2 } }],
+      failed: [],
+      lastSyncAt: null,
+      recentActivity: []
+    }));
+    apiRequestMock.mockResolvedValueOnce({
+      results: [{ mutation_id: "server-mut-1", entity_type: "meal_log", entity_id: "meal-1", status: "applied", server_version: 3, payload: {} }],
+      server_time: "2026-07-15T10:00:00.000Z"
+    }).mockResolvedValueOnce({ records: [], server_time: "2026-07-15T10:00:01.000Z" });
+    render(<SyncDataPage />);
+
+    const button = await screen.findByRole("button", { name: /sync now/i });
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledTimes(2));
+    expect(apiRequestMock).toHaveBeenCalledWith("/sync/push", expect.any(Object));
+    expect(apiRequestMock).toHaveBeenCalledWith("/sync/pull");
+    expect(apiRequestMock).not.toHaveBeenCalledWith("/sync/migrate", expect.any(Object));
+    await waitFor(() => expect(screen.getAllByText(/Sync completed/i).length).toBeGreaterThan(0));
+  });
+
+  it("does not report success when pull fails after push", async () => {
+    window.localStorage.setItem("project-suiii:phase-4-sync-queue", JSON.stringify({
+      version: 4,
+      deviceId: "device-local",
+      deviceName: "This device",
+      csrfToken: null,
+      pending: [{ client_mutation_id: "mut-1", device_id: "device-local", entity_type: "meal_log", entity_id: "meal-1", mutation_type: "upsert", created_at: "2026-07-15T00:00:00.000Z", payload: { client_record_id: "meal-1", version: 2 } }],
+      failed: [],
+      lastSyncAt: null,
+      recentActivity: []
+    }));
+    apiRequestMock.mockResolvedValueOnce({
+      results: [{ mutation_id: "server-mut-1", entity_type: "meal_log", entity_id: "meal-1", status: "applied", server_version: 3, payload: {} }],
+      server_time: "2026-07-15T10:00:00.000Z"
+    }).mockRejectedValueOnce(new Error("pull failed"));
+    render(<SyncDataPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /sync now/i }));
+
+    await waitFor(() => expect(screen.getByText(/Server unavailable/i)).toBeInTheDocument());
+    expect(window.localStorage.getItem("project-suiii:phase-4-sync-queue")).toContain("mut-1");
+    expect(window.localStorage.getItem("project-suiii:phase-4-sync-queue")).not.toContain("lastSyncAt\":\"2026");
   });
 
   it("reviews device data summaries and expands readable records without auth secrets", async () => {
@@ -167,7 +287,7 @@ describe("Phase 4 auth and sync screens", () => {
     expect(apiRequestMock).not.toHaveBeenCalled();
   });
 
-  it("clears confirmed migrated records and replaces the route on full success", async () => {
+  it("marks confirmed migrated records and replaces the route on full success", async () => {
     seedMigrationData();
     apiRequestMock.mockResolvedValue(migrationResponse({ imported_records: 3, summary: { meal_logs: 1, workout_sessions: 1, daily_check_ins: 1, sets: 0, date_range: "2026-07-15", total_records: 3 } }));
     render(<LocalMigrationPage />);
@@ -176,9 +296,14 @@ describe("Phase 4 auth and sync screens", () => {
 
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/"));
     expect(apiRequestMock).toHaveBeenCalledTimes(1);
-    expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).not.toContain("2026-07-15:pre-badminton");
-    expect(window.localStorage.getItem("project-suiii:phase-3-training")).not.toContain("session-1");
-    expect(window.localStorage.getItem("project-suiii:phase-3-training")).not.toContain("readiness-2026-07-15");
+    const request = JSON.parse(String((apiRequestMock.mock.calls[0][1] as { body: string }).body)) as { records: { entity_type: string; payload: Record<string, unknown> }[] };
+    const daily = request.records.find((record) => record.entity_type === "daily_tracking");
+    expect(daily?.payload).not.toHaveProperty("water_ml");
+    expect(daily?.payload).not.toHaveProperty("cigarettes");
+    expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).toContain("2026-07-15:pre-badminton");
+    expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).toContain("migratedAt");
+    expect(window.localStorage.getItem("project-suiii:phase-3-training")).toContain("session-1");
+    expect(window.localStorage.getItem("project-suiii:phase-3-training")).toContain("readiness-2026-07-15");
   });
 
   it("does not clear local records before backend confirmation", async () => {
@@ -195,7 +320,7 @@ describe("Phase 4 auth and sync screens", () => {
       resolveRequest(migrationResponse({ imported_records: 3, summary: { meal_logs: 1, workout_sessions: 1, daily_check_ins: 1, sets: 0, date_range: "2026-07-15", total_records: 3 } }));
     });
 
-    await waitFor(() => expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).not.toContain("2026-07-15:pre-badminton"));
+    await waitFor(() => expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).toContain("migratedAt"));
   });
 
   it("treats already-existing records as successful completion", async () => {
@@ -206,7 +331,7 @@ describe("Phase 4 auth and sync screens", () => {
     fireEvent.click(await screen.findByRole("button", { name: /import/i }));
 
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/"));
-    expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).not.toContain("2026-07-15:pre-badminton");
+    expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).toContain("migratedAt");
   });
 
   it("keeps rejected records locally and remains on the page for partial success", async () => {
@@ -232,7 +357,7 @@ describe("Phase 4 auth and sync screens", () => {
     expect(await screen.findByText(/need attention/i)).toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalledWith("/");
     expect(window.localStorage.getItem("project-suiii:phase-2-nutrition")).toContain("2026-07-15:pre-badminton");
-    expect(window.localStorage.getItem("project-suiii:phase-3-training")).not.toContain("session-1");
+    expect(window.localStorage.getItem("project-suiii:phase-3-training")).toContain("migratedAt");
   });
 
   it("retains all local data on HTTP 500 or network failure", async () => {
