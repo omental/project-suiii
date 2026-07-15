@@ -77,7 +77,7 @@ export function WeeklyCheckInPage() {
         <Segment label="Hunger" value={hunger} setValue={setHunger} options={["low", "normal", "high"]} />
         <Segment label="Digestion" value={digestion} setValue={setDigestion} options={["good", "some_gas", "difficult"]} />
         <label className="mt-3 block display text-suii-muted">Average Sleep Minutes<input className="mt-2 w-full rounded-lg border border-white/15 bg-black p-3 text-white" value={sleep} onChange={(e) => setSleep(e.target.value)} inputMode="numeric" /></label>
-        <textarea className="mt-3 min-h-24 w-full rounded-lg border border-white/15 bg-black p-3" placeholder="Add a private note" value={note} onChange={(event) => setNote(event.target.value)} />
+        <textarea className="mt-3 min-h-24 w-full rounded-lg border border-white/15 bg-black p-3" aria-label="Private note" value={note} onChange={(event) => setNote(event.target.value)} />
       </section>
       <section className="card mt-4 p-4">
         <h2 className="display flex items-center gap-2 text-2xl"><Camera className="text-suii-gold" /> Progress Photos</h2>
@@ -94,7 +94,7 @@ function NumberField({ icon, label, value, setValue, unit, help }: { icon: React
 }
 
 function MiniField({ label, value, setValue }: { label: string; value: string; setValue: (value: string) => void }) {
-  return <label className="display text-suii-muted">{label}<input className="mt-2 w-full rounded-lg border border-white/15 bg-black p-3 text-white" value={value} onChange={(event) => setValue(event.target.value)} inputMode="decimal" placeholder="in" /></label>;
+  return <label className="display text-suii-muted">{label}<input className="mt-2 w-full rounded-lg border border-white/15 bg-black p-3 text-white" value={value} onChange={(event) => setValue(event.target.value)} inputMode="decimal" aria-label={`${label} inches`} /></label>;
 }
 
 function Segment<T extends string>({ label, value, setValue, options }: { label: string; value: T; setValue: (value: T) => void; options: T[] }) {

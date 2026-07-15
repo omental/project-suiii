@@ -38,6 +38,8 @@ export function validateDeviceBackupText(text: string, current = buildDeviceData
   if (!envelope.exportedAt || Number.isNaN(Date.parse(envelope.exportedAt))) return errorPreview("Backup export date is invalid.");
   if (!envelope.data || typeof envelope.data !== "object") return errorPreview("Backup data categories are missing.");
   const data = envelope.data as Record<string, unknown>;
+  const trainingIssue = validateTrainingPayload(data.training);
+  if (trainingIssue) return errorPreview(trainingIssue);
   const unsupportedRecords = Object.keys(data).filter((key) => !allowedDataKeys.has(key)).length;
   const recordsFound = Object.values(data).reduce<number>((sum, category) => sum + countNestedRecords(category), 0);
   const currentSerialized = JSON.stringify(current.data);
@@ -55,6 +57,32 @@ export function validateDeviceBackupText(text: string, current = buildDeviceData
     unsupportedRecords,
     envelope: envelope as DeviceDataExportEnvelope
   };
+}
+
+function validateTrainingPayload(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== "object") return "Training backup data is invalid.";
+  const sessions = (value as { sessions?: unknown }).sessions;
+  if (sessions === undefined || sessions === null) return null;
+  if (!sessions || typeof sessions !== "object" || Array.isArray(sessions)) return "Training sessions must be an object.";
+  for (const session of Object.values(sessions as Record<string, unknown>)) {
+    if (!session || typeof session !== "object") return "Training session data is invalid.";
+    const exerciseSessions = (session as { exerciseSessions?: unknown }).exerciseSessions;
+    if (!Array.isArray(exerciseSessions)) continue;
+    for (const exerciseSession of exerciseSessions) {
+      if (!exerciseSession || typeof exerciseSession !== "object") return "Training exercise-session data is invalid.";
+      const setLogs = (exerciseSession as { setLogs?: unknown }).setLogs;
+      if (!Array.isArray(setLogs)) continue;
+      for (const set of setLogs) {
+        if (!set || typeof set !== "object") return "Training set data is invalid.";
+        const candidate = set as { rir?: unknown; formRating?: unknown; actualWeightKg?: unknown };
+        if (candidate.rir !== null && candidate.rir !== undefined && (typeof candidate.rir !== "number" || !Number.isInteger(candidate.rir) || candidate.rir < 0 || candidate.rir > 5)) return "Training backup contains an invalid RIR value.";
+        if (candidate.formRating !== null && candidate.formRating !== undefined && !["good", "acceptable", "needs_adjustment"].includes(String(candidate.formRating))) return "Training backup contains an invalid form rating.";
+        if (candidate.actualWeightKg !== null && candidate.actualWeightKg !== undefined && typeof candidate.actualWeightKg !== "number") return "Training backup contains an invalid load value.";
+      }
+    }
+  }
+  return null;
 }
 
 export async function previewBackupFile(file: File): Promise<RestorePreview> {

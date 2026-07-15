@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, CheckCircle2, ListChecks, XCircle } from "luci
 import Link from "next/link";
 import type React from "react";
 import { AppShell } from "@/components/AppShell";
+import { ExerciseFormDiagram } from "@/components/training/ExerciseFormDiagram";
 import { formGuides, getExerciseDefinition, getWorkoutDefinition } from "@/data/training";
 import { useTrainingRepository } from "@/hooks/useTrainingRepository";
 import { TrainingButton, TrainingTopBar } from "@/components/training/TrainingChrome";
@@ -24,14 +25,7 @@ export function FormGuidePage({ sessionId, exerciseId }: { sessionId: string; ex
         <span className="mt-3 inline-flex rounded-full border border-suii-gold px-4 py-2 display text-suii-gold">{exercise.difficulty}</span>
 
         <section className="card mt-5 p-4">
-          <div className="grid grid-cols-3 gap-2 text-center">
-            {["Start", "Move", "Finish"].map((label, index) => (
-              <div key={label} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                <div className={`mx-auto h-28 w-16 rounded-t-full border ${index === 1 ? "border-suii-lime bg-suii-lime/10" : "border-white/20 bg-white/5"}`} />
-                <p className="display mt-3 text-suii-lime">{label}</p>
-              </div>
-            ))}
-          </div>
+          <ExerciseFormDiagram exerciseId={exercise.id} />
         </section>
 
         <GuideList icon={<ListChecks className="size-8 text-suii-lime" />} title="Setup" items={guide.setup} />
@@ -54,6 +48,8 @@ export function FormGuidePage({ sessionId, exerciseId }: { sessionId: string; ex
         </section>
 
         <GuideList icon={<XCircle className="size-8 text-suii-lime" />} title="Avoid" items={guide.commonMistakes} />
+        {guide.regressionOptions?.length ? <GuideList icon={<ListChecks className="size-8 text-suii-lime" />} title="Make It Easier" items={guide.regressionOptions} /> : null}
+        {guide.progressionOptions?.length ? <GuideList icon={<CheckCircle2 className="size-8 text-suii-lime" />} title="Progress Carefully" items={guide.progressionOptions} /> : null}
         <GuideList icon={<AlertTriangle className="size-8 text-suii-amber" />} title="Stop If" items={guide.stopConditions} tone="gold" />
 
         <div className="mt-4 grid gap-2">

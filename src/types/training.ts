@@ -20,17 +20,48 @@ export type WorkoutStatus = "scheduled" | "active" | "paused" | "partial" | "com
 export type WorkoutCategory = "strength" | "mobility" | "recovery" | "rest";
 export type SorenessLevel = "none" | "mild" | "high";
 export type EnergyLevel = "low" | "normal" | "high";
-export type RirChoice = 0 | 1 | 2 | 3 | 4;
+export type RirChoice = 0 | 1 | 2 | 3 | 4 | 5;
+export type FormRating = "good" | "acceptable" | "needs_adjustment";
+export type MovementPattern = "squat" | "hinge" | "horizontal_push" | "horizontal_pull" | "vertical_push" | "vertical_pull" | "lunge" | "core_anti_extension" | "core_anti_rotation" | "arm_isolation" | "shoulder_care" | "mobility" | "recovery";
+
+export interface ExerciseIllustration {
+  startLabel: string;
+  finishLabel: string;
+  direction: "up" | "down" | "back" | "forward" | "out" | "rotate" | "hold";
+  equipmentFocus: string;
+  description: string;
+}
 
 export interface ExerciseDefinition {
   id: string;
   name: string;
   muscles: string[];
+  primaryMuscles?: string[];
+  secondaryMuscles?: string[];
   difficulty: "foundation" | "moderate" | "restorative";
   equipment: EquipmentType[];
+  optionalEquipment?: EquipmentType[];
+  movementPattern?: MovementPattern;
+  laterality?: "bilateral" | "left_right" | "alternating" | "hold";
   unilateral?: boolean;
   hold?: boolean;
   mobility?: boolean;
+  defaultSets?: number;
+  defaultReps?: string;
+  defaultSeconds?: string;
+  defaultRestSeconds?: number;
+  defaultTempo?: string;
+  startInstructions?: string[];
+  movementInstructions?: string[];
+  breathingInstructions?: string;
+  coachingCues?: string[];
+  commonMistakes?: string[];
+  stopConditions?: string[];
+  regressionOptions?: string[];
+  progressionOptions?: string[];
+  substitutionIds?: string[];
+  illustration?: ExerciseIllustration;
+  accessibilityDescription?: string;
   defaultResistance: ResistanceSelection;
 }
 
@@ -83,12 +114,17 @@ export interface SetLog {
   sideLogs?: SideLog[];
   resistance: ResistanceSelection;
   rir: RirChoice | null;
+  formRating?: FormRating | null;
+  actualWeightKg?: number | null;
   completedAt: string | null;
   note?: string;
 }
 
 export interface ExerciseSession {
   exercisePrescriptionId: string;
+  originalExerciseId?: string;
+  performedExerciseId?: string;
+  substitutionReason?: string;
   uncomfortable: boolean;
   setLogs: SetLog[];
 }
@@ -107,8 +143,15 @@ export interface ReadinessCheckIn {
   id: string;
   date: string;
   badmintonGames: number;
+  badmintonPlayedToday?: boolean;
+  badmintonDurationMinutes?: number | null;
+  badmintonIntensity?: "easy" | "moderate" | "hard" | null;
   energy: EnergyLevel;
   soreness: number;
+  legSoreness?: number;
+  shoulderSoreness?: number;
+  sleepQuality?: "poor" | "ok" | "good";
+  unusualPainAcknowledged?: boolean;
   soreAreas: string[];
   sleepHours: number | null;
   note: string;
@@ -160,6 +203,8 @@ export interface ExerciseFormGuide {
   quickCues: string[];
   commonMistakes: string[];
   stopConditions: string[];
+  regressionOptions?: string[];
+  progressionOptions?: string[];
 }
 
 export interface ProgressionRecommendation {
@@ -167,6 +212,9 @@ export interface ProgressionRecommendation {
   title: string;
   action: "repeat" | "add_reps" | "slow_tempo" | "add_band" | "reduce_volume" | "review";
   reason: string;
+  proposedPrescription?: string;
+  createdAt?: string;
+  status?: "pending" | "accepted" | "declined" | "review_later";
 }
 
 export interface TrainingHistorySummary {
@@ -186,4 +234,5 @@ export interface Phase3TrainingState {
   activeSessionId: string | null;
   readinessByDate: Record<string, ReadinessCheckIn>;
   uncomfortableExerciseIds: string[];
+  progressionRecommendations?: Record<string, ProgressionRecommendation>;
 }

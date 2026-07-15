@@ -19,6 +19,7 @@ from app.models.migration_batch import MigrationBatch
 from app.models.sync_device import SyncDevice
 from app.models.sync_mutation import SyncMutation
 from app.models.weekly_check_in import WeeklyCheckIn
+from app.models.workout_session import WorkoutSession
 from app.schemas.sync import MigrationPreview, MigrationRequest, MutationRequest, MutationResult
 from app.services.sync_service import SyncService, SyncValidationError, parse_local_date, parse_utc_datetime
 
@@ -47,6 +48,7 @@ class FakeSession:
         self.devices: dict[tuple[uuid.UUID, str], SyncDevice] = {}
         self.mutations: dict[tuple[uuid.UUID, str], SyncMutation] = {}
         self.meals: dict[tuple[uuid.UUID, str], MealLog] = {}
+        self.workouts: dict[tuple[uuid.UUID, str], WorkoutSession] = {}
         self.daily: dict[tuple[uuid.UUID, date], DailyTracking] = {}
         self.measurements: dict[tuple[uuid.UUID, str], BodyMeasurement] = {}
         self.check_ins: dict[tuple[uuid.UUID, str], WeeklyCheckIn] = {}
@@ -81,6 +83,8 @@ class FakeSession:
             return self.mutations.get((user_id, params.get("client_mutation_id_1")))
         if entity is MealLog:
             return self.meals.get((user_id, params.get("client_record_id_1")))
+        if entity is WorkoutSession:
+            return self.workouts.get((user_id, params.get("client_record_id_1")))
         if entity is DailyTracking:
             return self.daily.get((user_id, params.get("tracking_date_1")))
         if entity is BodyMeasurement:
@@ -108,6 +112,8 @@ class FakeSession:
                 self.mutations[(record.user_id, record.client_mutation_id)] = record
             elif isinstance(record, MealLog):
                 self.meals[(record.user_id, record.client_record_id)] = record
+            elif isinstance(record, WorkoutSession):
+                self.workouts[(record.user_id, record.client_record_id)] = record
             elif isinstance(record, DailyTracking):
                 self.daily[(record.user_id, record.tracking_date)] = record
             elif isinstance(record, BodyMeasurement):
@@ -204,6 +210,46 @@ def meal_mutation(payload: dict[str, Any] | None = None, mutation_id: str = "mig
         mutation_type="upsert",
         payload=body,
     )
+
+
+def workout_mutation(payload: dict[str, Any] | None = None, mutation_id: str = "migrate-workout-session-1") -> MutationRequest:
+    body = {
+        "client_record_id": "session-1",
+        "date": "2026-07-15",
+        "workoutDefinitionId": "full-body-a",
+        "status": "completed",
+        "startedAt": "2026-07-15T07:00:00.000Z",
+        "completedAt": "2026-07-15T07:45:00.000Z",
+        "version": 1,
+        "payload": {
+            "id": "session-1",
+            "workoutDefinitionId": "full-body-a",
+            "exerciseSessions": [
+                {
+                    "exercisePrescriptionId": "fba-one-arm-row",
+                    "originalExerciseId": "one-arm-row",
+                    "performedExerciseId": "bent-over-row",
+                    "substitutionReason": "chair unavailable",
+                    "setLogs": [
+                        {
+                            "id": "set-1",
+                            "status": "completed",
+                            "reps": 12,
+                            "actualWeightKg": 15,
+                            "rir": 2,
+                            "formRating": "acceptable",
+                            "note": "smooth",
+                        },
+                        {"id": "set-2", "status": "skipped", "rir": 5},
+                    ],
+                }
+            ],
+            "readiness": {"badmintonIntensity": "hard", "legSoreness": 6},
+            "progressionRecommendations": {"rec-1": {"status": "review_later"}},
+        },
+    }
+    body.update(payload or {})
+    return MutationRequest(client_mutation_id=mutation_id, device_id="device-local", entity_type="workout_session", entity_id="session-1", mutation_type="upsert", payload=body)
 
 
 def daily_mutation(payload: dict[str, Any] | None = None, mutation_id: str = "migrate-daily-2026-07-15") -> MutationRequest:
@@ -319,6 +365,30 @@ async def test_migrate_exact_production_meal_payload_and_retry_is_idempotent() -
     assert meal.started_at == datetime(2026, 7, 15, 6, 8, 30, 92000, tzinfo=UTC)
     assert meal.completed_at == datetime(2026, 7, 15, 6, 8, 32, 205000, tzinfo=UTC)
     assert meal.payload["startedAt"] == "2026-07-15T06:08:30.092Z"
+
+
+@pytest.mark.asyncio
+async def test_workout_session_json_payload_preserves_sprint3_quality_fields() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    first = await service.migrate_local_data(USER_ID, migration([workout_mutation()]))
+    retry = await service.migrate_local_data(USER_ID, migration([workout_mutation()]))
+    workout = session.workouts[(USER_ID, "session-1")]
+
+    set_logs = workout.payload["exerciseSessions"][0]["setLogs"]
+    assert first.imported_records == 1
+    assert retry.skipped_records == 1
+    assert workout.workout_definition_id == "full-body-a"
+    assert workout.payload["exerciseSessions"][0]["originalExerciseId"] == "one-arm-row"
+    assert workout.payload["exerciseSessions"][0]["performedExerciseId"] == "bent-over-row"
+    assert set_logs[0]["actualWeightKg"] == 15
+    assert set_logs[0]["rir"] == 2
+    assert set_logs[0]["formRating"] == "acceptable"
+    assert set_logs[0]["note"] == "smooth"
+    assert set_logs[1]["status"] == "skipped"
+    assert workout.payload["readiness"]["badmintonIntensity"] == "hard"
+    assert workout.payload["progressionRecommendations"]["rec-1"]["status"] == "review_later"
 
 
 @pytest.mark.asyncio

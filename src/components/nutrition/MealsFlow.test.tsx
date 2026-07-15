@@ -21,7 +21,7 @@ vi.mock("next/navigation", async () => {
   };
 });
 
-describe("Phase 2 meals flow", () => {
+describe("Meals flow", () => {
   beforeEach(() => {
     resetNutritionStateForTests();
     push.mockReset();

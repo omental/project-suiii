@@ -9,15 +9,19 @@ import {
   createWorkoutSession,
   defaultPhase3TrainingState,
   discardSession,
+  jumpToExercise,
   makeTrainingRepository,
   markExerciseUncomfortable,
   pauseSession,
   readTrainingState,
+  replaceExercise,
   resumeSession,
   saveAndExit,
   saveFeedback,
   saveSet,
   skipSet,
+  undoLastSet,
+  updateProgressionRecommendation,
   writeTrainingState
 } from "@/lib/trainingRepository";
 import type { Phase3TrainingState, ReadinessCheckIn, RirChoice, SessionFeedback } from "@/types/training";
@@ -54,6 +58,9 @@ export function useTrainingRepository() {
     },
     saveSet: (sessionId: string, input: Parameters<typeof saveSet>[2]) => commit(saveSet(state, sessionId, input)),
     skipSet: (sessionId: string) => commit(skipSet(state, sessionId)),
+    undoLastSet: (sessionId: string) => commit(undoLastSet(state, sessionId)),
+    jumpToExercise: (sessionId: string, exerciseIndex: number) => commit(jumpToExercise(state, sessionId, exerciseIndex)),
+    replaceExercise: (sessionId: string, exercisePrescriptionId: string, replacementExerciseId: string, reason?: string) => commit(replaceExercise(state, sessionId, exercisePrescriptionId, replacementExerciseId, reason)),
     adjustRest: (sessionId: string, deltaSeconds: number) => commit(adjustRest(state, sessionId, deltaSeconds)),
     clearRest: (sessionId: string) => commit(clearRest(state, sessionId)),
     pauseSession: (sessionId: string) => commit(pauseSession(state, sessionId)),
@@ -63,6 +70,7 @@ export function useTrainingRepository() {
     markExerciseUncomfortable: (sessionId: string, prescriptionId: string) => commit(markExerciseUncomfortable(state, sessionId, prescriptionId)),
     completeSession: (sessionId: string, feedback?: SessionFeedback, partial?: boolean) => commit(completeSession(state, sessionId, feedback, partial)),
     saveFeedback: (sessionId: string, feedback: SessionFeedback) => commit(saveFeedback(state, sessionId, feedback)),
+    updateProgressionRecommendation: (recommendationId: string, status: "accepted" | "declined" | "review_later") => commit(updateProgressionRecommendation(state, recommendationId, status)),
     quickSet: (sessionId: string, reps: number, rir: RirChoice) => commit(saveSet(state, sessionId, { reps, rir }))
   };
 }

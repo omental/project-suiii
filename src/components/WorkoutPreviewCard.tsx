@@ -73,7 +73,7 @@ export function WorkoutPreviewCard({ workout, href, ctaLabel = "Start Workout" }
               </li>
             ))}
           </ol>
-          <p className="text-sm text-suii-muted">The guided workout player arrives in Phase 2.</p>
+          <p className="text-sm text-suii-muted">Open Train to start the guided workout for the current programme day.</p>
           <button
             type="button"
             onClick={() => setOpen(false)}

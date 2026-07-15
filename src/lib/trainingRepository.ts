@@ -1,4 +1,4 @@
-import { getExerciseDefinition, getWorkoutDefinition, getWorkoutForDate, weeklyTrainingSchedule } from "@/data/training";
+import { getExerciseDefinition, getExerciseSubstitutions, getWorkoutDefinition, getWorkoutForDate, weeklyTrainingSchedule } from "@/data/training";
 import {
   addRestSeconds,
   clampNumber,
@@ -18,6 +18,7 @@ import type {
   RirChoice,
   SessionFeedback,
   SetLog,
+  FormRating,
   WorkoutSession
 } from "@/types/training";
 
@@ -29,7 +30,8 @@ export const defaultPhase3TrainingState: Phase3TrainingState = {
   sessions: {},
   activeSessionId: null,
   readinessByDate: {},
-  uncomfortableExerciseIds: []
+  uncomfortableExerciseIds: [],
+  progressionRecommendations: {}
 };
 
 function nowISO() {
@@ -70,8 +72,15 @@ export function createReadiness(date: string, input: Partial<ReadinessCheckIn>):
     id: `readiness-${date}`,
     date,
     badmintonGames: clampNumber(Number(input.badmintonGames ?? 0), 0, 10),
+    badmintonPlayedToday: Boolean(input.badmintonPlayedToday ?? Number(input.badmintonGames ?? 0) > 0),
+    badmintonDurationMinutes: input.badmintonDurationMinutes === undefined || input.badmintonDurationMinutes === null ? null : clampNumber(Number(input.badmintonDurationMinutes), 0, 300),
+    badmintonIntensity: input.badmintonIntensity ?? null,
     energy: input.energy ?? "normal",
     soreness: clampNumber(Number(input.soreness ?? 2), 0, 10),
+    legSoreness: clampNumber(Number(input.legSoreness ?? input.soreness ?? 2), 0, 10),
+    shoulderSoreness: clampNumber(Number(input.shoulderSoreness ?? input.soreness ?? 2), 0, 10),
+    sleepQuality: input.sleepQuality ?? "ok",
+    unusualPainAcknowledged: Boolean(input.unusualPainAcknowledged ?? false),
     soreAreas: input.soreAreas ?? [],
     sleepHours: input.sleepHours ?? null,
     note: input.note ?? "",
@@ -83,6 +92,8 @@ export function createReadiness(date: string, input: Partial<ReadinessCheckIn>):
 function createEmptyExerciseSessions(workoutId: string) {
   return getWorkoutDefinition(workoutId).exercises.map((prescription) => ({
     exercisePrescriptionId: prescription.id,
+    originalExerciseId: prescription.exerciseId,
+    performedExerciseId: prescription.exerciseId,
     uncomfortable: false,
     setLogs: []
   }));
@@ -138,14 +149,14 @@ function updateSession(state: Phase3TrainingState, session: WorkoutSession): Pha
   return { ...state, sessions: { ...state.sessions, [session.id]: { ...session, updatedAt: nowISO() } } };
 }
 
-export function saveSet(state: Phase3TrainingState, sessionId: string, input: { reps?: number; seconds?: number; rir?: RirChoice; resistance?: ResistanceSelection; sideLogs?: { side: "left" | "right"; reps: number }[] }) {
+export function saveSet(state: Phase3TrainingState, sessionId: string, input: { reps?: number; seconds?: number; rir?: RirChoice; resistance?: ResistanceSelection; sideLogs?: { side: "left" | "right"; reps: number }[]; formRating?: FormRating; note?: string; actualWeightKg?: number | null; status?: "completed" | "skipped" }) {
   const session = state.sessions[sessionId];
   if (!session || session.status === "completed") return state;
   const workout = getWorkoutDefinition(session.workoutDefinitionId);
   const prescription = workout.exercises[session.currentExerciseIndex];
-  const exercise = getExerciseDefinition(prescription.exerciseId);
   const exerciseSession = session.exerciseSessions.find((item) => item.exercisePrescriptionId === prescription.id);
   if (!exerciseSession) return state;
+  const exercise = getExerciseDefinition(exerciseSession.performedExerciseId ?? prescription.exerciseId);
   const setNumber = session.currentSetNumber;
   const reps = input.reps === undefined ? null : clampNumber(Number(input.reps), 0, 300);
   const seconds = input.seconds === undefined ? null : clampNumber(Number(input.seconds), 0, 1800);
@@ -153,12 +164,15 @@ export function saveSet(state: Phase3TrainingState, sessionId: string, input: { 
     id: `${session.id}-${prescription.id}-${setNumber}-${Date.now()}`,
     exercisePrescriptionId: prescription.id,
     setNumber,
-    status: "completed",
+    status: input.status ?? "completed",
     reps,
     seconds,
     sideLogs: input.sideLogs?.map((side) => ({ ...side, reps: clampNumber(Number(side.reps), 0, 300) })),
     resistance: input.resistance ?? exercise.defaultResistance,
     rir: input.rir ?? 2,
+    formRating: input.formRating ?? "good",
+    actualWeightKg: input.actualWeightKg ?? (input.resistance?.kind === "dumbbell" ? input.resistance.kgPerUnit * input.resistance.units : exercise.defaultResistance.kind === "dumbbell" ? exercise.defaultResistance.kgPerUnit * exercise.defaultResistance.units : null),
+    note: input.note?.trim() || undefined,
     completedAt: nowISO()
   };
   const nextExerciseSessions = session.exerciseSessions.map((item) => item.exercisePrescriptionId === prescription.id ? { ...item, setLogs: [...item.setLogs, set] } : item);
@@ -188,7 +202,51 @@ export function saveSet(state: Phase3TrainingState, sessionId: string, input: { 
 }
 
 export function skipSet(state: Phase3TrainingState, sessionId: string) {
-  return saveSet(state, sessionId, { reps: 0, rir: 4, resistance: currentPrescription(state.sessions[sessionId]).exerciseId ? undefined : undefined });
+  return saveSet(state, sessionId, { reps: 0, rir: 5, status: "skipped", note: "Skipped during workout." });
+}
+
+export function undoLastSet(state: Phase3TrainingState, sessionId: string) {
+  const session = state.sessions[sessionId];
+  if (!session || session.status === "completed") return state;
+  const logged = session.exerciseSessions
+    .flatMap((exerciseSession) => exerciseSession.setLogs.map((set) => ({ set, exerciseSession })))
+    .sort((a, b) => (b.set.completedAt ?? "").localeCompare(a.set.completedAt ?? ""));
+  const latest = logged[0];
+  if (!latest) return state;
+  const workout = getWorkoutDefinition(session.workoutDefinitionId);
+  const exerciseIndex = workout.exercises.findIndex((item) => item.id === latest.exerciseSession.exercisePrescriptionId);
+  const nextExerciseSessions = session.exerciseSessions.map((item) => item.exercisePrescriptionId === latest.exerciseSession.exercisePrescriptionId ? { ...item, setLogs: item.setLogs.filter((set) => set.id !== latest.set.id) } : item);
+  return updateSession(state, {
+    ...session,
+    currentExerciseIndex: Math.max(0, exerciseIndex),
+    currentSetNumber: latest.set.setNumber,
+    exerciseSessions: nextExerciseSessions,
+    restTimer: null
+  });
+}
+
+export function jumpToExercise(state: Phase3TrainingState, sessionId: string, exerciseIndex: number) {
+  const session = state.sessions[sessionId];
+  if (!session || session.status === "completed") return state;
+  const workout = getWorkoutDefinition(session.workoutDefinitionId);
+  const index = clampNumber(Math.round(exerciseIndex), 0, workout.exercises.length - 1);
+  const prescription = workout.exercises[index];
+  const exerciseSession = session.exerciseSessions.find((item) => item.exercisePrescriptionId === prescription.id);
+  const completedSets = exerciseSession?.setLogs.filter((set) => set.status === "completed" || set.status === "skipped").length ?? 0;
+  const nextSet = clampNumber(completedSets + 1, 1, plannedSets(prescription, 1, session.adjustment?.kind));
+  return updateSession(state, { ...session, currentExerciseIndex: index, currentSetNumber: nextSet, restTimer: null });
+}
+
+export function replaceExercise(state: Phase3TrainingState, sessionId: string, exercisePrescriptionId: string, replacementExerciseId: string, reason = "Equipment-aware substitution") {
+  const session = state.sessions[sessionId];
+  if (!session || session.status === "completed") return state;
+  const workout = getWorkoutDefinition(session.workoutDefinitionId);
+  const prescription = workout.exercises.find((item) => item.id === exercisePrescriptionId);
+  const replacement = getExerciseDefinition(replacementExerciseId);
+  const allowed = prescription ? getExerciseSubstitutions(prescription.exerciseId).some((item) => item.id === replacement.id) : false;
+  if (!prescription || !allowed) return state;
+  const nextExerciseSessions = session.exerciseSessions.map((item) => item.exercisePrescriptionId === exercisePrescriptionId ? { ...item, performedExerciseId: replacement.id, substitutionReason: reason } : item);
+  return updateSession(state, { ...session, exerciseSessions: nextExerciseSessions });
 }
 
 export function adjustRest(state: Phase3TrainingState, sessionId: string, deltaSeconds: number) {
@@ -257,6 +315,18 @@ export function completeSession(state: Phase3TrainingState, sessionId: string, f
   return { ...updateSession(state, nextSession), activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId };
 }
 
+export function updateProgressionRecommendation(state: Phase3TrainingState, recommendationId: string, status: "accepted" | "declined" | "review_later") {
+  const existing = state.progressionRecommendations?.[recommendationId];
+  if (!existing) return state;
+  return {
+    ...state,
+    progressionRecommendations: {
+      ...(state.progressionRecommendations ?? {}),
+      [recommendationId]: { ...existing, status }
+    }
+  };
+}
+
 export function saveFeedback(state: Phase3TrainingState, sessionId: string, feedback: SessionFeedback) {
   const session = state.sessions[sessionId];
   if (!session) return state;
@@ -282,7 +352,10 @@ export function makeTrainingRepository(state: Phase3TrainingState) {
     getHistorySummary: summarizeTrainingHistory.bind(null, state),
     getRecommendations(sessionId?: string) {
       const session = sessionId ? state.sessions[sessionId] : Object.values(state.sessions).find((item) => item.status === "completed" || item.status === "partial");
-      return session ? makeProgressionRecommendation(session) : null;
+      if (!session) return null;
+      const recommendation = makeProgressionRecommendation(session);
+      const stored = state.progressionRecommendations?.[`${session.id}:${recommendation.exerciseId}`];
+      return stored ?? recommendation;
     },
     getSessionTotals(session: WorkoutSession) {
       return {

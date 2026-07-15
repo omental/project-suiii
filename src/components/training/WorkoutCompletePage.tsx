@@ -37,6 +37,11 @@ export function WorkoutCompletePage({ sessionId }: { sessionId: string }) {
   const workout = getWorkoutDefinition(session.workoutDefinitionId);
   const totals = repository.getSessionTotals(session);
   const recommendation = repository.getRecommendations(sessionId);
+  const allSets = session.exerciseSessions.flatMap((exercise) => exercise.setLogs);
+  const skippedSets = allSets.filter((set) => set.status === "skipped").length;
+  const ratedSets = allSets.filter((set) => set.formRating);
+  const averageRir = allSets.filter((set) => set.rir !== null).reduce((sum, set) => sum + (set.rir ?? 0), 0) / Math.max(1, allSets.filter((set) => set.rir !== null).length);
+  const needsFormReview = ratedSets.filter((set) => set.formRating === "needs_adjustment").length;
 
   return (
     <AppShell hideNavigation>
@@ -58,19 +63,26 @@ export function WorkoutCompletePage({ sessionId }: { sessionId: string }) {
           <StatTile label="Kg Volume" value={totals.volumeKg} />
         </section>
 
+        <section className="card mt-3 grid grid-cols-3 gap-2 p-3">
+          <StatTile label="Avg RIR" value={averageRir.toFixed(1)} tone="blue" />
+          <StatTile label="Skipped" value={skippedSets} tone="gold" />
+          <StatTile label="Form Review" value={needsFormReview} />
+        </section>
+
         <section className="card mt-3 p-4">
           <h2 className="display text-2xl text-suii-muted">Exercise Results</h2>
           <div className="mt-2 divide-y divide-white/10">
-            {session.exerciseSessions.slice(0, 5).map((exerciseSession, index) => {
+            {session.exerciseSessions.map((exerciseSession, index) => {
               const prescription = workout.exercises.find((item) => item.id === exerciseSession.exercisePrescriptionId)!;
-              const exercise = getExerciseDefinition(prescription.exerciseId);
+              const exercise = getExerciseDefinition(exerciseSession.performedExerciseId ?? prescription.exerciseId);
               const reps = exerciseSession.setLogs.reduce((sum, set) => sum + (set.reps ?? set.seconds ?? 0) + (set.sideLogs?.reduce((sideSum, side) => sideSum + side.reps, 0) ?? 0), 0);
+              const formText = exerciseSession.setLogs.some((set) => set.formRating === "needs_adjustment") ? "review form" : exerciseSession.setLogs.some((set) => set.formRating === "acceptable") ? "acceptable form" : "good form";
               return (
                 <div key={exerciseSession.exercisePrescriptionId} className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 py-3">
                   <span className="grid size-8 place-items-center rounded-full border border-white/20 text-sm">{index + 1}</span>
                   <div>
                     <p className="display text-lg text-white">{exercise.name}</p>
-                    <p className="text-xs text-suii-muted">{exercise.defaultResistance.label}</p>
+                    <p className="text-xs text-suii-muted">{exercise.defaultResistance.label} · {formText}</p>
                   </div>
                   <span className="display text-suii-lime">{reps} reps</span>
                 </div>
@@ -107,7 +119,7 @@ export function WorkoutCompletePage({ sessionId }: { sessionId: string }) {
         <section className="card mt-3 grid grid-cols-3 gap-2 p-3">
           <div className="rounded-lg border border-white/10 p-3"><p className="display text-white">Badminton</p><Check className="mt-1 size-5 text-suii-lime" /></div>
           <div className="rounded-lg border border-white/10 p-3"><p className="display text-white">Workout</p><Check className="mt-1 size-5 text-suii-lime" /></div>
-          <div className="rounded-lg border border-white/10 p-3"><p className="display text-white">Protein</p><p className="mt-1 text-suii-blue">{consumed.protein} / 145g</p></div>
+          <div className="rounded-lg border border-white/10 p-3"><p className="display text-white">Protein</p><p className="mt-1 text-suii-blue">{consumed.protein}g logged</p></div>
         </section>
 
         <div className="mt-4 grid gap-2">

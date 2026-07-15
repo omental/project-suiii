@@ -54,7 +54,7 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
       const body = await response.json() as { detail?: string };
       message = body.detail ?? message;
     } catch {
-      // Keep the generic message when the server returns an empty body.
+      // Keep the fallback message when the server returns an empty body.
     }
     throw new ApiError(response.status, message);
   }

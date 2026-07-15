@@ -30,7 +30,7 @@ describe("TodayDashboard", () => {
     expect(screen.queryByText(new RegExp(["38", "5"].join(".") + " in", "i"))).not.toBeInTheDocument();
   });
 
-  it("links the next action to the Phase 2 weighing workflow", () => {
+  it("links the next action to the weighing workflow", () => {
     render(<TodayDashboard />);
 
     expect(screen.getByRole("link", { name: /start weighing/i })).toHaveAttribute(

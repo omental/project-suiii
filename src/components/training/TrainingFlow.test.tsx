@@ -52,7 +52,7 @@ describe("Phase 3 training flow", () => {
     workout.exercises.forEach((prescription) => {
       expect(within(preview).getByText(getExerciseDefinition(prescription.exerciseId).name)).toBeInTheDocument();
     });
-    expect(within(preview).queryByText(/\+\s*\d+\s*more exercises/i)).not.toBeInTheDocument();
+    expect(within(preview).queryByText(new RegExp(`\\+\\s*\\d+\\s*${["more", "exercises"].join(" ")}`, "i"))).not.toBeInTheDocument();
     expect(within(preview).getAllByText(/sets/i)).toHaveLength(workout.exercises.length);
   });
 
@@ -110,6 +110,24 @@ describe("Phase 3 training flow", () => {
     expect(screen.getByRole("progressbar", { name: /workout progress/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/repetitions/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /form guide/i })).toHaveAttribute("href", `/train/session/${state.activeSessionId}/exercise/goblet-squat/form`);
+  });
+
+  it("restores an active session on the dashboard with review and confirmed discard actions", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let state = createWorkoutSession(defaultPhase3TrainingState, "2026-07-14", "full-body-a", null);
+    state = { ...state, sessions: { ...state.sessions, [state.activeSessionId!]: { ...state.sessions[state.activeSessionId!], updatedAt: "2026-07-14T12:02:00.000Z" } } };
+    writeTrainingState(state);
+
+    render(<TrainDashboard />);
+
+    expect(await screen.findByText(/Resume Full Body A/i)).toBeInTheDocument();
+    expect(screen.getByText(/current: Goblet Squat/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^resume$/i })).toHaveAttribute("href", `/train/session/${state.activeSessionId}`);
+    expect(screen.getByRole("link", { name: /review/i })).toHaveAttribute("href", `/train/session/${state.activeSessionId}/complete`);
+    await user.click(screen.getByRole("button", { name: /discard/i }));
+    expect(screen.getByRole("heading", { name: /discard saved workout/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /keep workout/i }));
+    expect(screen.queryByRole("heading", { name: /discard saved workout/i })).not.toBeInTheDocument();
   });
 
   it("logs a set and opens the absolute rest timer state", async () => {
