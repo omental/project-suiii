@@ -8,8 +8,14 @@ export class ApiError extends Error {
   }
 }
 
+export class NetworkError extends Error {
+  constructor() {
+    super("Unable to connect to the server. Please check your connection and try again.");
+  }
+}
+
 export function getApiBaseUrl() {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1";
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8100/api/v1";
 }
 
 export function readCsrfToken() {
@@ -31,12 +37,17 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     const csrf = readCsrfToken();
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...options,
-    method,
-    headers,
-    credentials: "include"
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
+      ...options,
+      method,
+      headers,
+      credentials: "include"
+    });
+  } catch {
+    throw new NetworkError();
+  }
   if (!response.ok) {
     let message = "Request failed";
     try {
@@ -49,6 +60,16 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export function userFacingApiError(error: unknown) {
+  if (error instanceof NetworkError) return error.message;
+  if (error instanceof ApiError) {
+    if (error.status === 401) return "Invalid email or password.";
+    if (error.status === 429) return "Too many login attempts. Please wait and try again.";
+    if (error.status >= 500 && error.status <= 599) return "The server is temporarily unavailable. Please try again shortly.";
+  }
+  return "Something went wrong. Please try again.";
 }
 
 export async function login(email: string, password: string, remember_me: boolean, device_name: string) {

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
@@ -20,10 +24,101 @@ from app.models.weekly_check_in import WeeklyCheckIn
 from app.models.workout_session import WorkoutSession
 from app.schemas.sync import MigrationRequest, MigrationResponse, MutationRequest, MutationResult
 
+logger = logging.getLogger(__name__)
+
 
 def request_hash(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+class SyncValidationError(ValueError):
+    def __init__(self, code: str, message: str, field: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.field = field
+
+
+def _empty_optional(value: Any) -> bool:
+    return value is None or value == ""
+
+
+def parse_local_date(value: Any, field: str = "local_date") -> date:
+    if isinstance(value, datetime):
+        raise SyncValidationError("invalid_local_date", f"{field} must be a calendar date.", field)
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise SyncValidationError("invalid_local_date", f"{field} must use YYYY-MM-DD.", field) from exc
+    raise SyncValidationError("invalid_local_date", f"{field} must be a calendar date.", field)
+
+
+def parse_utc_datetime(value: Any, field: str, *, optional: bool = True) -> datetime | None:
+    if _empty_optional(value):
+        if optional:
+            return None
+        raise SyncValidationError("invalid_timestamp", f"{field} is required.", field)
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise SyncValidationError("invalid_timestamp", f"{field} must be a valid ISO timestamp.", field) from exc
+    else:
+        raise SyncValidationError("invalid_timestamp", f"{field} must be a valid ISO timestamp.", field)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise SyncValidationError("invalid_timestamp", f"{field} must include timezone information.", field)
+    return parsed.astimezone(UTC)
+
+
+def parse_optional_uuid(value: Any, field: str) -> UUID | None:
+    if _empty_optional(value):
+        return None
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str):
+        try:
+            return UUID(value)
+        except ValueError as exc:
+            raise SyncValidationError("invalid_uuid", f"{field} must be a valid UUID.", field) from exc
+    raise SyncValidationError("invalid_uuid", f"{field} must be a valid UUID.", field)
+
+
+def parse_optional_decimal(value: Any, field: str) -> Decimal | None:
+    if _empty_optional(value):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise SyncValidationError("invalid_decimal", f"{field} must be a valid number.", field) from exc
+
+
+def payload_value(payload: dict[str, Any], snake_name: str, camel_name: str | None = None) -> Any:
+    if snake_name in payload:
+        return payload[snake_name]
+    if camel_name and camel_name in payload:
+        return payload[camel_name]
+    return None
+
+
+def require_payload_value(payload: dict[str, Any], snake_name: str, camel_name: str | None = None) -> Any:
+    value = payload_value(payload, snake_name, camel_name)
+    if _empty_optional(value):
+        raise SyncValidationError("missing_required_field", f"{snake_name} is required.", snake_name)
+    return value
+
+
+def has_payload_value(payload: dict[str, Any], snake_name: str, camel_name: str | None = None) -> bool:
+    return snake_name in payload or bool(camel_name and camel_name in payload)
+
+
+def next_version(current: int | None, incoming: Any) -> int:
+    return max((current or 0) + 1, int(incoming or 1))
 
 
 class SyncService:
@@ -44,7 +139,9 @@ class SyncService:
         if existing:
             if existing.request_hash != digest:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mutation id reused with different payload")
-            return MutationResult(**existing.response_payload, status="duplicate")
+            response_payload = dict(existing.response_payload)
+            response_payload["status"] = "duplicate"
+            return MutationResult(**response_payload)
 
         if mutation.entity_type == "daily_tracking":
             result = await self._apply_daily_tracking(user_id, mutation)
@@ -77,7 +174,7 @@ class SyncService:
 
     async def _apply_daily_tracking(self, user_id: UUID, mutation: MutationRequest) -> MutationResult:
         payload = mutation.payload
-        tracking_date = payload["tracking_date"]
+        tracking_date = parse_local_date(require_payload_value(payload, "tracking_date", "date"), "tracking_date")
         record = await self.db.scalar(select(DailyTracking).where(DailyTracking.user_id == user_id, DailyTracking.tracking_date == tracking_date))
         if record and payload.get("version", 1) < record.version:
             return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="conflict", server_version=record.version, payload={"server_updated_at": record.updated_at.isoformat()})
@@ -90,16 +187,19 @@ class SyncService:
             for field in ("water_ml", "cigarettes", "sleep_minutes", "badminton_games", "energy", "soreness", "notes"):
                 if field in payload:
                     setattr(record, field, payload[field])
-            record.version = max(record.version + 1, payload.get("version", 1))
+            record.version = next_version(record.version, payload.get("version", 1))
         await self.db.flush()
         return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
 
     async def _apply_body_measurement(self, user_id: UUID, mutation: MutationRequest) -> MutationResult:
         payload = mutation.payload
+        measured_at = parse_utc_datetime(require_payload_value(payload, "measured_at", "measuredAt"), "measured_at", optional=False)
+        local_date = parse_local_date(require_payload_value(payload, "local_date", "date"), "local_date")
+        client_record_id = require_payload_value(payload, "client_record_id", "id")
         record = await self.db.scalar(
             select(BodyMeasurement).where(
                 BodyMeasurement.user_id == user_id,
-                BodyMeasurement.client_record_id == payload["client_record_id"],
+                BodyMeasurement.client_record_id == client_record_id,
             )
         )
         if record and payload.get("version", 1) < record.version:
@@ -107,27 +207,46 @@ class SyncService:
         if record is None:
             record = BodyMeasurement(
                 user_id=user_id,
-                client_record_id=payload["client_record_id"],
-                measured_at=payload["measured_at"],
-                local_date=payload["local_date"],
+                client_record_id=client_record_id,
+                measured_at=measured_at,
+                local_date=local_date,
             )
             self.db.add(record)
         if mutation.mutation_type == "delete":
             record.deleted_at = utc_now()
         else:
-            for field in ("measured_at", "local_date", "weight_kg", "waist_in", "chest_in", "arm_in", "thigh_in", "source", "note"):
+            typed_payload = {
+                "measured_at": measured_at,
+                "local_date": local_date,
+                "weight_kg": parse_optional_decimal(payload.get("weight_kg"), "weight_kg"),
+                "waist_in": parse_optional_decimal(payload.get("waist_in"), "waist_in"),
+                "chest_in": parse_optional_decimal(payload.get("chest_in"), "chest_in"),
+                "arm_in": parse_optional_decimal(payload.get("arm_in"), "arm_in"),
+                "thigh_in": parse_optional_decimal(payload.get("thigh_in"), "thigh_in"),
+            }
+            for field, camel_field in (("measured_at", "measuredAt"), ("local_date", "date")):
+                if has_payload_value(payload, field, camel_field):
+                    setattr(record, field, typed_payload[field])
+            for field in ("weight_kg", "waist_in", "chest_in", "arm_in", "thigh_in"):
+                if has_payload_value(payload, field):
+                    setattr(record, field, typed_payload[field])
+            for field in ("source", "note"):
                 if field in payload:
                     setattr(record, field, payload[field])
-            record.version = max(record.version + 1, payload.get("version", 1))
+            record.version = next_version(record.version, payload.get("version", 1))
         await self.db.flush()
         return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
 
     async def _apply_weekly_check_in(self, user_id: UUID, mutation: MutationRequest) -> MutationResult:
         payload = mutation.payload
+        check_in_date = parse_local_date(require_payload_value(payload, "check_in_date", "date"), "check_in_date")
+        completed_at = parse_utc_datetime(payload_value(payload, "completed_at", "completedAt"), "completed_at")
+        measurement_id = parse_optional_uuid(payload_value(payload, "measurement_id", "measurementId"), "measurement_id")
+        client_record_id = require_payload_value(payload, "client_record_id", "id")
         record = await self.db.scalar(
             select(WeeklyCheckIn).where(
                 WeeklyCheckIn.user_id == user_id,
-                WeeklyCheckIn.client_record_id == payload["client_record_id"],
+                WeeklyCheckIn.client_record_id == client_record_id,
             )
         )
         if record and payload.get("version", 1) < record.version:
@@ -135,72 +254,106 @@ class SyncService:
         if record is None:
             record = WeeklyCheckIn(
                 user_id=user_id,
-                client_record_id=payload["client_record_id"],
+                client_record_id=client_record_id,
                 week_number=payload["week_number"],
-                check_in_date=payload["check_in_date"],
+                check_in_date=check_in_date,
             )
             self.db.add(record)
         if mutation.mutation_type == "delete":
             record.deleted_at = utc_now()
         else:
-            for field in ("week_number", "check_in_date", "status", "energy", "hunger", "digestion", "average_sleep_minutes", "private_note", "measurement_id", "completed_at"):
+            typed_payload = {
+                "check_in_date": check_in_date,
+                "completed_at": completed_at,
+                "measurement_id": measurement_id,
+            }
+            for field in ("week_number", "status", "energy", "hunger", "digestion", "average_sleep_minutes", "private_note"):
                 if field in payload:
                     setattr(record, field, payload[field])
-            record.version = max(record.version + 1, payload.get("version", 1))
+            for field, camel_field in (("check_in_date", "date"), ("measurement_id", "measurementId"), ("completed_at", "completedAt")):
+                if has_payload_value(payload, field, camel_field):
+                    setattr(record, field, typed_payload[field])
+            record.version = next_version(record.version, payload.get("version", 1))
         await self.db.flush()
         return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
 
     async def _apply_domain_record(self, user_id: UUID, mutation: MutationRequest, model: type[MealLog] | type[WorkoutSession], definition_field: str) -> MutationResult:
         payload = mutation.payload
-        record = await self.db.scalar(select(model).where(model.user_id == user_id, model.client_record_id == payload["client_record_id"]))
+        local_date = parse_local_date(require_payload_value(payload, "local_date", "date"), "local_date")
+        started_at = parse_utc_datetime(payload_value(payload, "started_at", "startedAt"), "started_at")
+        completed_at = parse_utc_datetime(payload_value(payload, "completed_at", "completedAt"), "completed_at")
+        definition_id = require_payload_value(payload, "definition_id", "mealDefinitionId" if model is MealLog else "workoutDefinitionId")
+        client_record_id = require_payload_value(payload, "client_record_id", "id")
+        record_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        record = await self.db.scalar(select(model).where(model.user_id == user_id, model.client_record_id == client_record_id))
         if record and payload.get("version", 1) < record.version:
             return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="conflict", server_version=record.version, payload={"server_updated_at": record.updated_at.isoformat()})
         if record is None:
-            record = model(user_id=user_id, client_record_id=payload["client_record_id"], local_date=payload["local_date"], status=payload["status"], payload=payload["payload"])
-            setattr(record, definition_field, payload["definition_id"])
+            record = model(user_id=user_id, client_record_id=client_record_id, local_date=local_date, status=payload["status"], payload=record_payload)
+            setattr(record, definition_field, definition_id)
             self.db.add(record)
         if mutation.mutation_type == "delete":
             record.deleted_at = utc_now()
         else:
-            record.local_date = payload["local_date"]
-            setattr(record, definition_field, payload["definition_id"])
+            record.local_date = local_date
+            setattr(record, definition_field, definition_id)
             record.status = payload["status"]
-            record.payload = payload["payload"]
-            record.started_at = payload.get("started_at")
-            record.completed_at = payload.get("completed_at")
-            record.version = max(record.version + 1, payload.get("version", 1))
+            record.payload = record_payload
+            record.started_at = started_at
+            record.completed_at = completed_at
+            record.version = next_version(record.version, payload.get("version", 1))
         await self.db.flush()
         return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
 
     async def migrate_local_data(self, user_id: UUID, request: MigrationRequest) -> MigrationResponse:
-        await self.ensure_device(user_id, request.device_id, request.device_name)
         imported = skipped = conflicts = errors = 0
-        for mutation in request.records:
-            try:
-                result = await self.apply_mutation(user_id, mutation)
-                if result.status in {"applied", "duplicate"}:
-                    imported += 1
-                elif result.status == "conflict":
-                    conflicts += 1
-            except Exception:
-                errors += 1
-        batch = MigrationBatch(
-            user_id=user_id,
-            device_id=request.device_id,
-            conflict_policy=request.conflict_policy,
-            status="completed" if errors == 0 else "completed_with_errors",
-            total_records=request.preview.total_records,
-            imported_records=imported,
-            skipped_records=skipped,
-            conflict_records=conflicts,
-            error_records=errors,
-            summary=request.preview.model_dump(mode="json"),
-            completed_at=utc_now(),
-        )
-        self.db.add(batch)
-        device = await self.ensure_device(user_id, request.device_id, request.device_name)
-        device.last_sync_at = utc_now()
-        await self.db.commit()
+        rejected: list[dict[str, Any]] = []
+        try:
+            async with self.db.begin():
+                device = await self.ensure_device(user_id, request.device_id, request.device_name)
+                for mutation in request.records:
+                    try:
+                        async with self.db.begin_nested():
+                            result = await self.apply_mutation(user_id, mutation)
+                        if result.status in {"applied", "duplicate"}:
+                            imported += 1
+                        elif result.status == "conflict":
+                            conflicts += 1
+                    except SyncValidationError as exc:
+                        errors += 1
+                        rejected.append(
+                            {
+                                "record_type": mutation.entity_type,
+                                "client_record_id": payload_value(mutation.payload, "client_record_id", "id") or mutation.entity_id,
+                                "status": "rejected",
+                                "code": exc.code,
+                                "message": exc.message,
+                            }
+                        )
+                summary = request.preview.model_dump(mode="json")
+                summary["transaction_strategy"] = "partial_import_with_per_record_savepoints"
+                if rejected:
+                    summary["rejected_items"] = rejected
+                batch = MigrationBatch(
+                    user_id=user_id,
+                    device_id=request.device_id,
+                    conflict_policy=request.conflict_policy,
+                    status="completed" if errors == 0 else "completed_with_errors",
+                    total_records=request.preview.total_records,
+                    imported_records=imported,
+                    skipped_records=skipped,
+                    conflict_records=conflicts,
+                    error_records=errors,
+                    summary=summary,
+                    completed_at=utc_now(),
+                )
+                self.db.add(batch)
+                device.last_sync_at = utc_now()
+                await self.db.flush()
+        except SQLAlchemyError as exc:
+            await self.db.rollback()
+            logger.exception("sync_migration_database_failure", extra={"user_id": str(user_id), "device_id": request.device_id})
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Migration failed. Please try again shortly.") from exc
         return MigrationResponse(
             batch_id=batch.id,
             status=batch.status,

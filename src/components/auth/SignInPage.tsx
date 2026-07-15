@@ -4,7 +4,7 @@ import { Eye, Lock, Mail, ShieldCheck, Smartphone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type React from "react";
 import { useState } from "react";
-import { login } from "@/lib/apiClient";
+import { login, userFacingApiError } from "@/lib/apiClient";
 
 export function SignInPage() {
   const router = useRouter();
@@ -21,8 +21,8 @@ export function SignInPage() {
     try {
       await login(email, password, remember, "This device");
       router.push("/sync/migrate");
-    } catch {
-      setError("Invalid email or password.");
+    } catch (error) {
+      setError(userFacingApiError(error));
     } finally {
       setBusy(false);
     }

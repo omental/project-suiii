@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserSession
 from app.core.security import utc_now
 from app.db.session import get_db
 from app.schemas.sync import MigrationRequest, MigrationResponse, SyncPushRequest, SyncPushResponse, SyncStatusResponse
-from app.services.sync_service import SyncService
+from app.services.sync_service import SyncService, SyncValidationError
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -24,10 +25,17 @@ async def push(payload: SyncPushRequest, current: CurrentUserSession, db: Annota
     user, _ = current
     service = SyncService(db)
     results = []
-    for mutation in payload.mutations:
-        await service.ensure_device(user.id, mutation.device_id, mutation.device_id)
-        results.append(await service.apply_mutation(user.id, mutation))
-    await db.commit()
+    try:
+        for mutation in payload.mutations:
+            await service.ensure_device(user.id, mutation.device_id, mutation.device_id)
+            results.append(await service.apply_mutation(user.id, mutation))
+        await db.commit()
+    except SyncValidationError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Sync failed. Please try again shortly.") from exc
     return SyncPushResponse(results=results, server_time=utc_now())
 
 

@@ -12,6 +12,7 @@ export function LocalMigrationPage() {
   const [preview, setPreview] = useState<MigrationPreview>({ meal_logs: 0, workout_sessions: 0, daily_check_ins: 0, sets: 0, date_range: "No local records", total_records: 0 });
   const [policy, setPolicy] = useState<"keep_latest" | "keep_server" | "review_each">("keep_latest");
   const [status, setStatus] = useState("Ready to import");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     // Local migration data is only available after hydration.
@@ -20,8 +21,10 @@ export function LocalMigrationPage() {
   }, []);
 
   const importData = async () => {
+    if (busy) return;
     const queue = readSyncQueue();
     const records = buildMigrationMutations(queue.deviceId);
+    setBusy(true);
     try {
       await apiRequest("/sync/migrate", {
         method: "POST",
@@ -29,7 +32,9 @@ export function LocalMigrationPage() {
       });
       setStatus("Import complete");
     } catch {
-      setStatus("Import queued until the backend is reachable");
+      setStatus("Import failed. Local data remains on this device.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -81,7 +86,7 @@ export function LocalMigrationPage() {
           <p className="mt-3 text-suii-gold">Nothing is deleted automatically.</p>
         </section>
         <p className="card mt-4 flex items-center gap-3 p-4 text-suii-muted"><ShieldCheck className="size-8 text-suii-lime" />Only your signed-in account can access this data.</p>
-        <button onClick={importData} className="focus-ring mt-4 w-full rounded-lg bg-suii-lime px-4 py-4 display text-3xl text-black">Import {preview.total_records} Records ›</button>
+        <button onClick={importData} disabled={busy} className="focus-ring mt-4 w-full rounded-lg bg-suii-lime px-4 py-4 display text-3xl text-black disabled:opacity-60">{busy ? "Importing" : `Import ${preview.total_records} Records ›`}</button>
         <Link href="/" className="focus-ring mt-3 block rounded-lg border border-suii-lime px-4 py-4 text-center display text-2xl text-suii-lime">Start Fresh</Link>
         <p className="mt-3 flex gap-2 text-sm text-suii-muted"><Eye className="size-5 text-suii-blue" />You can review the import before final confirmation.</p>
       </div>
