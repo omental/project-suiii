@@ -1,4 +1,4 @@
-import type { AuthUser, SyncStatus } from "@/types/sync";
+import type { AuthUser, SyncDevice, SyncStatus, UserProfile, UserProfileUpdate } from "@/types/sync";
 
 const csrfStorageKey = "project-suiii:phase-4-csrf";
 
@@ -92,6 +92,35 @@ export function fetchMe() {
 
 export function fetchSyncStatus() {
   return apiRequest<SyncStatus>("/sync/status");
+}
+
+export function fetchProfile() {
+  return apiRequest<UserProfile>("/profile");
+}
+
+export function updateProfile(payload: UserProfileUpdate) {
+  return apiRequest<UserProfile>("/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function fetchDevices(deviceId?: string) {
+  return apiRequest<SyncDevice[]>(`/sync/devices${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ""}`);
+}
+
+export function renameDevice(device_id: string, device_name: string) {
+  return apiRequest<SyncDevice>("/sync/devices", {
+    method: "PATCH",
+    body: JSON.stringify({ device_id, device_name })
+  });
+}
+
+export function revokeDevice(device_id: string, confirm_current_device = false) {
+  return apiRequest<SyncDevice>("/sync/devices/revoke", {
+    method: "POST",
+    body: JSON.stringify({ device_id, confirm_current_device })
+  });
 }
 
 export function requestProgressReport(kind: "weekly" | "monthly", period_start: string, period_end: string) {

@@ -91,7 +91,7 @@ export function TrainDashboard() {
           ) : (
             <div>
               <h2 className="display text-4xl text-suii-lime">Complete Rest</h2>
-              <p className="mt-2 text-suii-muted">Friday recovery is protected. No make-up workout required; an easy walk is optional.</p>
+              <p className="mt-2 text-suii-muted">Recovery is protected. No make-up workout required; an easy walk is optional.</p>
             </div>
           )}
         </section>

@@ -107,3 +107,25 @@ class SyncStatusResponse(BaseModel):
     last_sync_at: datetime | None = None
     device_name: str | None = None
     recent_activity: list[str] = []
+
+
+class SyncDeviceRead(BaseModel):
+    id: UUID
+    device_id: str
+    device_id_display: str
+    device_name: str
+    first_seen_at: datetime
+    last_seen_at: datetime
+    last_sync_at: datetime | None = None
+    revoked_at: datetime | None = None
+    current: bool = False
+
+
+class SyncDeviceUpdate(BaseModel):
+    device_name: str = Field(min_length=1, max_length=120)
+    device_id: str = Field(min_length=1, max_length=180)
+
+
+class SyncDeviceRevoke(BaseModel):
+    device_id: str = Field(min_length=1, max_length=180)
+    confirm_current_device: bool = False

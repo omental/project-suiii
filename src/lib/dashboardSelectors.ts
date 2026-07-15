@@ -96,7 +96,8 @@ export function calculateTransformationProgress(progress: ProgressLocalState, re
   return clampPercent(values.reduce((sum, value) => sum + clampPercent(value), 0) / values.length);
 }
 
-export function getProgrammeStartDate(todayDateKey: string, activityDates: string[]) {
+export function getProgrammeStartDate(todayDateKey: string, activityDates: string[], serverProgrammeStartDate?: string | null) {
+  if (serverProgrammeStartDate) return serverProgrammeStartDate;
   const fallback = earliestDate(activityDates);
   if (typeof window === "undefined") return fallback ?? todayDateKey;
   try {
@@ -125,7 +126,8 @@ export function selectNextDashboardAction(
   todayDateKey: string,
   dhakaMinuteOfDay: number,
   nutrition: Phase2LocalState,
-  training: Phase3TrainingState
+  training: Phase3TrainingState,
+  preferredRestDay?: string | null
 ): NextDashboardAction {
   const day = getPlanDay(todayDateKey);
   const mealActions = day.meals
@@ -139,7 +141,7 @@ export function selectNextDashboardAction(
     }))
     .sort((a, b) => a.minute - b.minute);
 
-  const workout = getWorkoutForDate(todayDateKey);
+  const workout = getWorkoutForDate(todayDateKey, preferredRestDay);
   const completedWorkout = Object.values(training.sessions).some((session) => session.date === todayDateKey && session.status === "completed");
   const workoutMinute = workout ? minutesFromClockTime(workout.scheduledTime) : Number.POSITIVE_INFINITY;
 
@@ -182,14 +184,14 @@ export function selectNextDashboardAction(
   };
 }
 
-export function buildProgrammeSnapshot(todayDateKey: string, nutrition: Phase2LocalState, training: Phase3TrainingState, progress: ProgressLocalState) {
+export function buildProgrammeSnapshot(todayDateKey: string, nutrition: Phase2LocalState, training: Phase3TrainingState, progress: ProgressLocalState, profile?: { programmeStartDate?: string | null; transformationReference?: TransformationReference | null }) {
   const activityDates = collectActivityDates(nutrition, training, progress);
-  const programmeStartDate = getProgrammeStartDate(todayDateKey, activityDates);
+  const programmeStartDate = getProgrammeStartDate(todayDateKey, activityDates, profile?.programmeStartDate);
   return {
     programmeStartDate,
     ...getProgrammePosition(programmeStartDate, todayDateKey),
     activeStreak: calculateActiveStreak(activityDates, todayDateKey),
-    progressPercent: calculateTransformationProgress(progress),
+    progressPercent: calculateTransformationProgress(progress, profile?.transformationReference ?? null),
     elapsedDays: Math.max(0, daysBetween(programmeStartDate, todayDateKey))
   };
 }

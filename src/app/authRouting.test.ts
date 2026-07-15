@@ -29,6 +29,9 @@ describe("app route privacy boundary", () => {
     expect(existsSync(join(protectedDir, "train", "page.tsx"))).toBe(true);
     expect(existsSync(join(protectedDir, "progress", "page.tsx"))).toBe(true);
     expect(existsSync(join(protectedDir, "sync", "page.tsx"))).toBe(true);
+    expect(existsSync(join(protectedDir, "settings", "page.tsx"))).toBe(true);
+    expect(existsSync(join(protectedDir, "settings", "profile", "page.tsx"))).toBe(true);
+    expect(existsSync(join(protectedDir, "sync", "conflicts", "page.tsx"))).toBe(true);
     expect(existsSync(join(appDir, "sign-in", "page.tsx"))).toBe(true);
     expect(existsSync(join(appDir, "page.tsx"))).toBe(false);
   });

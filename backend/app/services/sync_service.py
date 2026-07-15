@@ -142,6 +142,8 @@ class SyncService:
         if device is None:
             device = SyncDevice(user_id=user_id, device_id=device_id, device_name=device_name)
             self.db.add(device)
+        elif device.revoked_at is not None:
+            raise SyncValidationError("device_revoked", "This device has been revoked. Re-register the device before syncing.", "device_id")
         device.last_seen_at = utc_now()
         return device
 

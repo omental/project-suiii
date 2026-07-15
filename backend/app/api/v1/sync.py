@@ -3,21 +3,75 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserSession
 from app.core.security import utc_now
 from app.db.session import get_db
-from app.schemas.sync import MigrationRequest, MigrationResponse, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncStatusResponse
+from app.models.sync_device import SyncDevice
+from app.schemas.sync import MigrationRequest, MigrationResponse, SyncDeviceRead, SyncDeviceRevoke, SyncDeviceUpdate, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncStatusResponse
 from app.services.sync_service import SyncService, SyncValidationError
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
+def _device_display(device_id: str) -> str:
+    return device_id if len(device_id) <= 10 else f"{device_id[:6]}…{device_id[-4:]}"
+
+
+def _device_read(row: SyncDevice, current_device_id: str | None = None) -> SyncDeviceRead:
+    return SyncDeviceRead(
+        id=row.id,
+        device_id=row.device_id,
+        device_id_display=_device_display(row.device_id),
+        device_name=row.device_name,
+        first_seen_at=row.first_seen_at,
+        last_seen_at=row.last_seen_at,
+        last_sync_at=row.last_sync_at,
+        revoked_at=row.revoked_at,
+        current=current_device_id == row.device_id,
+    )
+
+
 @router.get("/status", response_model=SyncStatusResponse)
 async def status() -> SyncStatusResponse:
     return SyncStatusResponse(online=True, recent_activity=["Backend ready"])
+
+
+@router.get("/devices", response_model=list[SyncDeviceRead])
+async def devices(current: CurrentUserSession, db: Annotated[AsyncSession, Depends(get_db)], device_id: str | None = None) -> list[SyncDeviceRead]:
+    user, _ = current
+    rows = (await db.scalars(select(SyncDevice).where(SyncDevice.user_id == user.id).order_by(SyncDevice.last_seen_at.desc()))).all()
+    return [_device_read(row, device_id) for row in rows]
+
+
+@router.patch("/devices", response_model=SyncDeviceRead)
+async def rename_device(payload: SyncDeviceUpdate, current: CurrentUserSession, db: Annotated[AsyncSession, Depends(get_db)]) -> SyncDeviceRead:
+    user, _ = current
+    row = await db.scalar(select(SyncDevice).where(SyncDevice.user_id == user.id, SyncDevice.device_id == payload.device_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if row.revoked_at is not None:
+        raise HTTPException(status_code=409, detail="Revoked devices cannot be renamed")
+    row.device_name = payload.device_name
+    await db.commit()
+    await db.refresh(row)
+    return _device_read(row, payload.device_id)
+
+
+@router.post("/devices/revoke", response_model=SyncDeviceRead)
+async def revoke_device(payload: SyncDeviceRevoke, current: CurrentUserSession, db: Annotated[AsyncSession, Depends(get_db)]) -> SyncDeviceRead:
+    user, _ = current
+    row = await db.scalar(select(SyncDevice).where(SyncDevice.user_id == user.id, SyncDevice.device_id == payload.device_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if row.revoked_at is None:
+        row.revoked_at = utc_now()
+    await db.commit()
+    await db.refresh(row)
+    return _device_read(row, payload.device_id)
 
 
 @router.post("/push", response_model=SyncPushResponse)

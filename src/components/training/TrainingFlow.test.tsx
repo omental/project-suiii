@@ -136,7 +136,7 @@ describe("Phase 3 training flow", () => {
   it("renders history, progression recommendation and accessible chart text", () => {
     render(<TrainingHistory />);
     expect(screen.getByRole("heading", { name: /training history/i })).toBeInTheDocument();
-    expect(screen.getByText(/Friday recovery protected/i)).toBeInTheDocument();
+    expect(screen.getByText(/Recovery day protected/i)).toBeInTheDocument();
     expect(screen.getByText(/Accessible chart values/i)).toBeInTheDocument();
     expect(screen.getByText(/Next Progression/i)).toBeInTheDocument();
   });

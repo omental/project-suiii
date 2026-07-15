@@ -32,6 +32,14 @@ export function latestMeasurement(state: ProgressLocalState) {
   return sortedMeasurements(state).at(-1) ?? null;
 }
 
+function dashboardTargetWeightRange() {
+  const [min, max] = dashboardData.user.targetWeightKg.split("-").map((value) => Number(value));
+  return {
+    min: Number.isFinite(min) ? min : dashboardData.user.startingWeightKg,
+    max: Number.isFinite(max) ? max : dashboardData.user.startingWeightKg
+  };
+}
+
 export function validateMeasurementInput(values: Partial<Pick<BodyMeasurement, "weightKg" | "waistIn" | "chestIn" | "armIn" | "thighIn">>) {
   const ranges = {
     weightKg: [20, 350],
@@ -50,7 +58,7 @@ export function validateMeasurementInput(values: Partial<Pick<BodyMeasurement, "
   return null;
 }
 
-export function buildForecast(measurements: BodyMeasurement[]) {
+export function buildForecast(measurements: BodyMeasurement[], targetMaxKg = dashboardTargetWeightRange().max) {
   const weightPoints = measurements.filter((item) => item.weightKg !== null);
   if (weightPoints.length < 3) return { available: false, reason: "At least three weekly measurements are required.", estimatedWeeks: null, weeklyRateKg: null };
   const first = weightPoints[0];
@@ -60,7 +68,7 @@ export function buildForecast(measurements: BodyMeasurement[]) {
   const rate = ((last.weightKg! - first.weightKg!) / span) * 7;
   if (rate >= -0.05) return { available: false, reason: "Trend is flat or away from the target range.", estimatedWeeks: null, weeklyRateKg: round(rate, 2) };
   if (Math.abs(rate) > 1.25) return { available: false, reason: "Recent rate is too noisy for a conservative estimate.", estimatedWeeks: null, weeklyRateKg: round(rate, 2) };
-  const remaining = Math.max(0, last.weightKg! - 74);
+  const remaining = Math.max(0, last.weightKg! - targetMaxKg);
   const weeks = remaining / Math.abs(rate);
   return { available: true, reason: "Trend estimate, not a guarantee.", estimatedWeeks: `${Math.max(1, Math.floor(weeks - 1))}-${Math.ceil(weeks + 2)} weeks`, weeklyRateKg: round(rate, 2) };
 }
@@ -77,6 +85,7 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
   const completedWorkouts = Object.values(training.sessions).filter((session) => session.status === "completed").length;
   const waterAdded = nutrition.waterIncrementsMl.reduce((sum, amount) => sum + amount, 0) / 1000;
   const cigaretteToday = nutrition.cigaretteIncrements.reduce((sum, amount) => sum + amount, 0);
+  const targetWeight = dashboardTargetWeightRange();
   const weightChange = latest?.weightKg === null || !latest ? null : latest.weightKg - dashboardData.user.startingWeightKg;
   const waistChange = latest?.waistIn === null || !latest ? null : latest.waistIn - dashboardData.user.startingWaistIn;
   const recentMilestones = [];
@@ -84,7 +93,7 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
   if (weightChange !== null && weightChange <= -2) recentMilestones.push("First 2 kg lost");
   if (waistChange !== null && waistChange <= -1) recentMilestones.push("First inch off waist");
   if (Object.values(state.checkIns).some((item) => item.status === "completed")) recentMilestones.push("First weekly check-in complete");
-  const forecast = buildForecast(measurements);
+  const forecast = buildForecast(measurements, targetWeight.max);
   const proteinDays = completedMeals >= 5 ? 1 : 0;
   const trendStatus = measurements.length < 2 ? "Not enough data for a trend" : weightChange !== null && weightChange < 0 ? "On track" : "Review adherence";
   const insight = measurements.length <= 1
@@ -97,8 +106,8 @@ export function buildProgressSummary(state: ProgressLocalState): ProgressSummary
     programmeTotalDays,
     currentWeightKg: latest?.weightKg ?? null,
     startingWeightKg: dashboardData.user.startingWeightKg,
-    targetWeightMinKg: 73,
-    targetWeightMaxKg: 74,
+    targetWeightMinKg: targetWeight.min,
+    targetWeightMaxKg: targetWeight.max,
     weightChangeKg: round(weightChange),
     currentWaistIn: latest?.waistIn ?? null,
     startingWaistIn: dashboardData.user.startingWaistIn,

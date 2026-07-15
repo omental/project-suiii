@@ -216,10 +216,11 @@ export function getWorkoutDefinition(id: string) {
   return workoutDefinitions.find((workout) => workout.id === id) ?? workoutDefinitions[0];
 }
 
-export function getWorkoutForDate(dateISO: string) {
+export function getWorkoutForDate(dateISO: string, preferredRestDay?: string | null) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return null;
   const date = new Date(`${dateISO}T12:00:00`);
   const dayName = date.toLocaleDateString("en-US", { weekday: "long" });
+  if (preferredRestDay && dayName === preferredRestDay) return null;
   const schedule = weeklyTrainingSchedule.find((entry) => entry.dayName === dayName) ?? weeklyTrainingSchedule[0];
   return schedule.workoutId ? getWorkoutDefinition(schedule.workoutId) : null;
 }

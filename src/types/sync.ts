@@ -98,6 +98,67 @@ export type AuthUser = {
   is_admin: boolean;
 };
 
+export type UserProfile = {
+  user_id: string;
+  height_cm: string;
+  starting_weight_kg: string;
+  target_weight_min_kg: string;
+  target_weight_max_kg: string;
+  starting_waist_in: string;
+  target_waist_in: string;
+  calorie_target: number;
+  protein_target_g: number;
+  water_target_ml: number;
+  timezone: string;
+  unit_system: "metric" | "imperial";
+  programme_start_date: string | null;
+  profile_configured: boolean;
+  preferred_rest_day: string | null;
+  preferred_workout_time: string | null;
+  equipment_csv: string | null;
+  badminton_enabled: boolean;
+  badminton_days_csv: string | null;
+  badminton_start_time: string | null;
+  badminton_end_time: string | null;
+  badminton_intensity: "easy" | "moderate" | "hard" | null;
+  show_exercise_illustrations: boolean;
+  rest_timer_sound: boolean;
+  default_rest_seconds: number | null;
+  exercise_substitutions_enabled: boolean;
+  planned_meals: number | null;
+  kitchen_scale_enabled: boolean;
+  measurement_unit: "metric" | "imperial";
+  meal_reminders_enabled: boolean;
+  sleep_target_minutes: number | null;
+  readiness_check_in_enabled: boolean;
+  weekly_check_in_day: string | null;
+  smoking_tracking_enabled: boolean;
+  cigarette_baseline: number | null;
+  cigarette_reduction_target: number | null;
+  first_cigarette_delay_minutes: number | null;
+  updated_at: string;
+  version: number;
+};
+
+export type UserProfileUpdate = Partial<Omit<UserProfile, "user_id" | "updated_at" | "version" | "equipment_csv" | "badminton_days_csv">> & {
+  full_name?: string;
+  equipment?: string[];
+  badminton_days?: string[];
+  expected_version?: number;
+};
+
+export type SyncDevice = {
+  id: string;
+  device_id: string;
+  device_id_display: string;
+  device_name: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_sync_at: string | null;
+  revoked_at: string | null;
+  current: boolean;
+};
+
 export type SyncStatus = {
   online: boolean;
   pending_mutations: number;

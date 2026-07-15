@@ -13,12 +13,14 @@ import { dashboardData } from "@/data/dashboard";
 import { getPlanDay } from "@/data/nutrition";
 import { equipmentLabels, getExerciseDefinition, getWorkoutForDate } from "@/data/training";
 import { buildProgrammeSnapshot, selectNextDashboardAction } from "@/lib/dashboardSelectors";
+import { fetchProfile } from "@/lib/apiClient";
 import { useDhakaClock } from "@/lib/dhakaClock";
 import { roundNutrition } from "@/lib/nutritionCalc";
 import { defaultProgressState, readProgressState } from "@/lib/progressRepository";
 import { useNutritionRepository } from "@/hooks/useNutritionRepository";
 import { useTrainingRepository } from "@/hooks/useTrainingRepository";
 import type { ProgressLocalState } from "@/types/progress";
+import type { UserProfile } from "@/types/sync";
 
 export function TodayDashboard() {
   const authUser = useAuthenticatedUser();
@@ -33,6 +35,7 @@ export function TodayDashboard() {
   const training = useTrainingRepository();
   const clock = useDhakaClock();
   const [progressState, setProgressState] = useState<ProgressLocalState>(defaultProgressState);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const displayName = authUser.full_name.trim() || authUser.email || "Athlete";
   const shortName = displayName.split(/\s+/)[0] || "Athlete";
   const authenticatedDashboard = {
@@ -48,6 +51,13 @@ export function TodayDashboard() {
     const timeoutId = window.setTimeout(() => setProgressState(readProgressState()), 0);
     return () => window.clearTimeout(timeoutId);
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    fetchProfile().then((next) => {
+      if (!cancelled) setProfile(next);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
   if (!clock.hydrated) {
     return (
       <AppShell>
@@ -58,17 +68,38 @@ export function TodayDashboard() {
   const todayDate = clock.dateKey;
   const day = getPlanDay(todayDate);
   const activeTrainingSession = training.repository.getActiveSession();
-  const todayWorkout = activeTrainingSession ? training.repository.getWorkoutDefinition(activeTrainingSession.workoutDefinitionId) : getWorkoutForDate(todayDate);
+  const todayWorkout = activeTrainingSession ? training.repository.getWorkoutDefinition(activeTrainingSession.workoutDefinitionId) : getWorkoutForDate(todayDate, profile?.preferred_rest_day);
   const completedWorkout = training.repository.getSessionHistory().find((session) => session.date === todayDate && session.status === "completed");
   const summary = repository.getDailyNutritionSummary(todayDate);
   const consumed = roundNutrition(summary.consumed);
   const waterLitres = Number((state.waterIncrementsMl.reduce((total, amount) => total + amount, 0) / 1000).toFixed(2));
   const cigarettes = Math.max(0, state.cigaretteIncrements.reduce((total, amount) => total + amount, 0));
   const dhakaMinuteOfDay = clock.parts ? clock.parts.hour * 60 + clock.parts.minute : 0;
-  const nextAction = selectNextDashboardAction(todayDate, dhakaMinuteOfDay, state, training.state);
-  const programme = buildProgrammeSnapshot(todayDate, state, training.state, progressState);
+  const nextAction = selectNextDashboardAction(todayDate, dhakaMinuteOfDay, state, training.state, profile?.preferred_rest_day);
+  const programme = buildProgrammeSnapshot(todayDate, state, training.state, progressState, profile ? {
+    programmeStartDate: profile.programme_start_date,
+    transformationReference: {
+      startingWeightKg: Number(profile.starting_weight_kg),
+      targetWeightKg: (Number(profile.target_weight_min_kg) + Number(profile.target_weight_max_kg)) / 2,
+      startingWaistIn: Number(profile.starting_waist_in),
+      targetWaistIn: Number(profile.target_waist_in)
+    }
+  } : undefined);
+  const targetWeightKg = profile ? `${Number(profile.target_weight_min_kg).toLocaleString()}-${Number(profile.target_weight_max_kg).toLocaleString()}` : authenticatedDashboard.user.targetWeightKg;
+  const profileDashboardUser = profile ? {
+    ...authenticatedDashboard.user,
+    heightCm: Number(profile.height_cm),
+    startingWeightKg: Number(profile.starting_weight_kg),
+    targetWeightKg,
+    startingWaistIn: Number(profile.starting_waist_in),
+    targetWaistIn: Number(profile.target_waist_in),
+    dailyCalorieTarget: profile.calorie_target,
+    dailyProteinTargetG: profile.protein_target_g,
+    dailyWaterTargetL: profile.water_target_ml / 1000
+  } : authenticatedDashboard.user;
   const dashboard = {
     ...authenticatedDashboard,
+    user: profileDashboardUser,
     dateISO: todayDate,
     streakDays: programme.activeStreak,
     transformation: {
@@ -79,10 +110,10 @@ export function TodayDashboard() {
     }
   };
   const metrics = dashboardData.metrics.map((metric) => {
-    if (metric.id === "calories") return { ...metric, value: consumed.calories };
-    if (metric.id === "protein") return { ...metric, value: consumed.protein };
-    if (metric.id === "water") return { ...metric, value: waterLitres };
-    if (metric.id === "cigarettes") return { ...metric, value: cigarettes };
+    if (metric.id === "calories") return { ...metric, value: consumed.calories, target: profile?.calorie_target ?? metric.target };
+    if (metric.id === "protein") return { ...metric, value: consumed.protein, target: profile?.protein_target_g ?? metric.target };
+    if (metric.id === "water") return { ...metric, value: waterLitres, target: profile ? profile.water_target_ml / 1000 : metric.target };
+    if (metric.id === "cigarettes") return { ...metric, value: cigarettes, target: profile?.cigarette_reduction_target ?? profile?.cigarette_baseline ?? metric.target };
     return metric;
   });
   const timelineEntries = day.meals.slice(0, 3).map((meal) => {

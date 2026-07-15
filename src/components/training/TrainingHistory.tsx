@@ -36,7 +36,7 @@ export function TrainingHistory() {
               <div><p className="display text-4xl text-white">{summary.streakWeeks || 4}</p><p className="display text-xs text-suii-muted">Week Streak</p></div>
             </div>
           </div>
-          <p className="mt-4 flex items-center gap-2 text-sm text-suii-muted"><ShieldCheck className="size-5 text-suii-lime" aria-hidden="true" /> Friday recovery protected</p>
+          <p className="mt-4 flex items-center gap-2 text-sm text-suii-muted"><ShieldCheck className="size-5 text-suii-lime" aria-hidden="true" /> Recovery day protected</p>
         </section>
 
         <section className="card mt-3 p-4">
