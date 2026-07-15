@@ -1,4 +1,6 @@
 import { getExerciseDefinition, getExerciseSubstitutions, getWorkoutDefinition, getWorkoutForDate, weeklyTrainingSchedule } from "@/data/training";
+import { storageKeyFor } from "@/lib/accountStorage";
+import { enqueueMutation, readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
 import {
   addRestSeconds,
   clampNumber,
@@ -22,8 +24,8 @@ import type {
   WorkoutSession
 } from "@/types/training";
 
-const phase3Key = "project-suiii:phase-3-training";
-const phase2Key = "project-suiii:phase-2-nutrition";
+const phase3Key = () => storageKeyFor("training");
+const phase2Key = () => storageKeyFor("nutrition");
 
 export const defaultPhase3TrainingState: Phase3TrainingState = {
   version: 3,
@@ -47,7 +49,7 @@ function isPhase3State(value: unknown): value is Phase3TrainingState {
 export function readTrainingState(): Phase3TrainingState {
   if (typeof window === "undefined") return defaultPhase3TrainingState;
   try {
-    const raw = window.localStorage.getItem(phase3Key);
+    const raw = window.localStorage.getItem(phase3Key());
     if (!raw) return defaultPhase3TrainingState;
     const parsed: unknown = JSON.parse(raw);
     return isPhase3State(parsed) ? { ...defaultPhase3TrainingState, ...parsed } : defaultPhase3TrainingState;
@@ -58,13 +60,13 @@ export function readTrainingState(): Phase3TrainingState {
 
 export function writeTrainingState(state: Phase3TrainingState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(phase3Key, JSON.stringify(state));
+  window.localStorage.setItem(phase3Key(), JSON.stringify(state));
 }
 
 export function resetTrainingStateForTests() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(phase3Key);
-  window.localStorage.removeItem(phase2Key);
+  window.localStorage.removeItem(phase3Key());
+  window.localStorage.removeItem(phase2Key());
 }
 
 export function createReadiness(date: string, input: Partial<ReadinessCheckIn>): ReadinessCheckIn {
@@ -312,7 +314,34 @@ export function completeSession(state: Phase3TrainingState, sessionId: string, f
     restTimer: null,
     feedback: feedback ?? session.feedback
   };
+  queueWorkoutSessionMutation(nextSession);
   return { ...updateSession(state, nextSession), activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId };
+}
+
+function queueWorkoutSessionMutation(session: WorkoutSession) {
+  if (typeof window === "undefined") return;
+  try {
+    const queue = readSyncQueue();
+    const next = enqueueMutation(queue, {
+      entity_type: "workout_session",
+      entity_id: session.id,
+      mutation_type: "upsert",
+      payload: {
+        client_record_id: session.id,
+        date: session.date,
+        workoutDefinitionId: session.workoutDefinitionId,
+        status: session.status,
+        startedAt: session.startedAt,
+        completedAt: session.completedAt,
+        updatedAt: session.updatedAt,
+        version: 3,
+        payload: session
+      }
+    });
+    writeSyncQueue(next);
+  } catch {
+    // The visible session remains in local training state; Sync & Data reports storage health.
+  }
 }
 
 export function updateProgressionRecommendation(state: Phase3TrainingState, recommendationId: string, status: "accepted" | "declined" | "review_later") {

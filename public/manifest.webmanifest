@@ -2,12 +2,16 @@
   "name": "Project SUIII",
   "short_name": "SUIII",
   "description": "Private elite-athlete fitness transformation tracker.",
+  "id": "/?app=project-suiii",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait",
   "background_color": "#050505",
   "theme_color": "#050505",
+  "categories": ["health", "fitness", "productivity"],
+  "lang": "en",
   "icons": [
     {
       "src": "/icons/icon.svg",
@@ -26,6 +30,15 @@
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "form_factor": "narrow",
+      "label": "Project SUIII private fitness tracker"
     }
   ]
 }

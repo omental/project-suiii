@@ -1,6 +1,7 @@
+import { storageKeyFor } from "@/lib/accountStorage";
 import type { UserProfile } from "@/types/sync";
 
-const programmeProfileKey = "project-suiii:programme-profile";
+const programmeProfileKey = () => storageKeyFor("programmeProfile");
 const markerPrefix = "project-suiii:profile-migration:v1";
 
 export type LocalProgrammeProfile = {
@@ -10,7 +11,7 @@ export type LocalProgrammeProfile = {
 export function readLocalProgrammeProfile(): LocalProgrammeProfile | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(programmeProfileKey);
+    const raw = window.localStorage.getItem(programmeProfileKey());
     return raw ? JSON.parse(raw) as LocalProgrammeProfile : null;
   } catch {
     return null;

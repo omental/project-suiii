@@ -2,11 +2,12 @@ import { getPlanDay } from "@/data/nutrition";
 import { getWorkoutForDate } from "@/data/training";
 import { addDays, daysBetween, getProgrammePosition } from "@/lib/dhakaClock";
 import { mealLogId } from "@/lib/nutritionCalc";
+import { storageKeyFor } from "@/lib/accountStorage";
 import type { Phase2LocalState } from "@/types/nutrition";
 import type { ProgressLocalState } from "@/types/progress";
 import type { Phase3TrainingState } from "@/types/training";
 
-const programmeProfileKey = "project-suiii:programme-profile";
+const programmeProfileKey = () => storageKeyFor("programmeProfile");
 
 export type TransformationReference = {
   startingWeightKg?: number | null;
@@ -101,11 +102,11 @@ export function getProgrammeStartDate(todayDateKey: string, activityDates: strin
   const fallback = earliestDate(activityDates);
   if (typeof window === "undefined") return fallback ?? todayDateKey;
   try {
-    const raw = window.localStorage.getItem(programmeProfileKey);
+    const raw = window.localStorage.getItem(programmeProfileKey());
     const parsed = raw ? JSON.parse(raw) as { programmeStartDate?: string } : null;
     if (parsed?.programmeStartDate) return parsed.programmeStartDate;
     const programmeStartDate = fallback ?? todayDateKey;
-    window.localStorage.setItem(programmeProfileKey, JSON.stringify({ programmeStartDate }));
+    window.localStorage.setItem(programmeProfileKey(), JSON.stringify({ programmeStartDate }));
     return programmeStartDate;
   } catch {
     return fallback ?? todayDateKey;

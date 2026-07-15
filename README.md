@@ -75,6 +75,17 @@ Phase 4 adds the FastAPI/PostgreSQL backend foundation, private authentication, 
 - Backend persistence for measurements, check-ins, photos, milestones and reports
 - Offline mutation queue entries for measurements and check-ins
 
+## Sprint 4 PWA And Offline Model
+
+- Custom service worker at `/sw.js` caches only static app assets, icons, manifest and a neutral `/offline.html` shell.
+- Authenticated API responses, profile data, sync payloads, progress data, reports, photos, cookies, CSRF values and private HTML are network-only and marked no-store/private where Next headers apply.
+- Active workouts can continue from local device state, complete offline, and queue a `workout_session` sync mutation.
+- Reconnect sync runs only while the app is open, after browser reconnection, with bounded attempts and no `/sync/migrate` calls.
+- Install and update state is shown under Settings/About; storage/cache health and offline backup export are shown under Settings/Data.
+- Timer alerts are limited to Project SUIII being open; reliable background notification delivery is not claimed.
+
+See `docs/pwa.md`, `docs/offline-model.md`, `docs/sync-model.md`, and `docs/privacy-cache-boundaries.md`.
+
 ## Routes
 
 - `/` - Today dashboard

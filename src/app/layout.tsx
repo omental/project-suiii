@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Oswald } from "next/font/google";
+import { PwaProvider } from "@/components/pwa/PwaProvider";
 import "./globals.css";
 
 const inter = Inter({
@@ -47,7 +48,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${oswald.variable}`}>
-      <body>{children}</body>
+      <body><PwaProvider>{children}</PwaProvider></body>
     </html>
   );
 }

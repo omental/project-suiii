@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SettingsChrome } from "@/components/settings/SettingsChrome";
+import { StorageStatusCard } from "@/components/pwa/StorageStatusCard";
 import { previewBackupFile, restoreAddMissing, type RestorePreview } from "@/lib/deviceBackup";
 
 export function DataPrivacyPage() {
@@ -22,6 +23,7 @@ export function DataPrivacyPage() {
   return (
     <SettingsChrome title="Data & Privacy">
       <div className="grid gap-4">
+        <StorageStatusCard />
         <section className="card p-4">
           <h2 className="display text-2xl">Restore Device Backup</h2>
           <p className="mt-2 text-sm text-suii-muted">Choose a Project SUIII JSON backup. Cookies, CSRF tokens, passwords, API URLs, sessions and environment settings are never restored.</p>

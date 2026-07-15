@@ -1,9 +1,10 @@
 import { defaultProgressState } from "@/lib/progressRepository";
+import { storageKeyFor } from "@/lib/accountStorage";
 import type { SyncMutation, SyncPullRecord } from "@/types/sync";
 
-const phase2Key = "project-suiii:phase-2-nutrition";
-const phase3Key = "project-suiii:phase-3-training";
-const progressKey = "project-suiii:phase-5-progress";
+const phase2Key = () => storageKeyFor("nutrition");
+const phase3Key = () => storageKeyFor("training");
+const progressKey = () => storageKeyFor("progress");
 
 function readJson(key: string) {
   if (typeof window === "undefined") return null;
@@ -44,25 +45,25 @@ function canMerge(record: SyncPullRecord, blocked: Set<string>) {
 
 function mergeMeal(record: SyncPullRecord) {
   const id = text(record.payload.id) ?? record.client_record_id;
-  const current = readJson(phase2Key) ?? { version: 2, mealLogs: {}, weighingSessions: {} };
+  const current = readJson(phase2Key()) ?? { version: 2, mealLogs: {}, weighingSessions: {} };
   const mealLogs = current.mealLogs && typeof current.mealLogs === "object" ? { ...current.mealLogs as Record<string, unknown> } : {};
   if (record.deleted_at) delete mealLogs[id];
   else mealLogs[id] = { ...record.payload, version: record.server_version, serverUpdatedAt: record.server_updated_at };
-  writeJson(phase2Key, { ...current, version: 2, mealLogs });
+  writeJson(phase2Key(), { ...current, version: 2, mealLogs });
 }
 
 function mergeWorkout(record: SyncPullRecord) {
   const id = text(record.payload.id) ?? record.client_record_id;
-  const current = readJson(phase3Key) ?? { version: 3, sessions: {}, readinessByDate: {}, activeSessionId: null };
+  const current = readJson(phase3Key()) ?? { version: 3, sessions: {}, readinessByDate: {}, activeSessionId: null };
   const sessions = current.sessions && typeof current.sessions === "object" ? { ...current.sessions as Record<string, unknown> } : {};
   if (record.deleted_at) delete sessions[id];
   else sessions[id] = { ...record.payload, version: record.server_version, serverUpdatedAt: record.server_updated_at };
-  writeJson(phase3Key, { ...current, version: 3, sessions });
+  writeJson(phase3Key(), { ...current, version: 3, sessions });
 }
 
 function mergeDailyTracking(record: SyncPullRecord) {
   const date = text(record.payload.tracking_date) ?? record.client_record_id;
-  const current = readJson(phase3Key) ?? { version: 3, sessions: {}, readinessByDate: {}, activeSessionId: null };
+  const current = readJson(phase3Key()) ?? { version: 3, sessions: {}, readinessByDate: {}, activeSessionId: null };
   const readinessByDate = current.readinessByDate && typeof current.readinessByDate === "object" ? { ...current.readinessByDate as Record<string, unknown> } : {};
   if (record.deleted_at) {
     delete readinessByDate[date];
@@ -80,11 +81,11 @@ function mergeDailyTracking(record: SyncPullRecord) {
       serverUpdatedAt: record.server_updated_at
     };
   }
-  writeJson(phase3Key, { ...current, version: 3, readinessByDate });
+  writeJson(phase3Key(), { ...current, version: 3, readinessByDate });
 }
 
 function mergeMeasurement(record: SyncPullRecord) {
-  const current = { ...defaultProgressState, ...(readJson(progressKey) ?? {}) };
+  const current = { ...defaultProgressState, ...(readJson(progressKey()) ?? {}) };
   const measurements = current.measurements && typeof current.measurements === "object" ? { ...(current.measurements as unknown as Record<string, Record<string, unknown>>) } : {};
   const existingKey = Object.entries(measurements).find(([, item]) => item.clientRecordId === record.client_record_id)?.[0];
   const id = existingKey ?? text(record.payload.id) ?? record.client_record_id;
@@ -108,11 +109,11 @@ function mergeMeasurement(record: SyncPullRecord) {
       serverUpdatedAt: record.server_updated_at
     };
   }
-  writeJson(progressKey, { ...current, version: 5, measurements });
+  writeJson(progressKey(), { ...current, version: 5, measurements });
 }
 
 function mergeCheckIn(record: SyncPullRecord) {
-  const current = { ...defaultProgressState, ...(readJson(progressKey) ?? {}) };
+  const current = { ...defaultProgressState, ...(readJson(progressKey()) ?? {}) };
   const checkIns = current.checkIns && typeof current.checkIns === "object" ? { ...(current.checkIns as unknown as Record<string, Record<string, unknown>>) } : {};
   const existingKey = Object.entries(checkIns).find(([, item]) => item.clientRecordId === record.client_record_id)?.[0];
   const id = existingKey ?? text(record.payload.id) ?? record.client_record_id;
@@ -137,7 +138,7 @@ function mergeCheckIn(record: SyncPullRecord) {
       serverUpdatedAt: record.server_updated_at
     };
   }
-  writeJson(progressKey, { ...current, version: 5, checkIns });
+  writeJson(progressKey(), { ...current, version: 5, checkIns });
 }
 
 export function mergePulledRecords(records: SyncPullRecord[], pendingMutations: SyncMutation[]) {

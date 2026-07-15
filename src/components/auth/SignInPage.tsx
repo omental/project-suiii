@@ -6,6 +6,7 @@ import type React from "react";
 import { useState } from "react";
 import { login, userFacingApiError } from "@/lib/apiClient";
 import { buildMigrationPreview, hasCompletedMigration } from "@/lib/localMigration";
+import { recordAuthenticatedAccount } from "@/lib/offlineAccount";
 import { readSyncQueue } from "@/lib/syncQueue";
 
 export function SignInPage() {
@@ -22,6 +23,7 @@ export function SignInPage() {
     setError("");
     try {
       const response = await login(email, password, remember, "This device");
+      recordAuthenticatedAccount(response.user.id);
       const queue = readSyncQueue();
       const needsMigration = !hasCompletedMigration(response.user.id, queue.deviceId) && buildMigrationPreview().total_records > 0;
       router.push(needsMigration ? "/sync/migrate" : "/");

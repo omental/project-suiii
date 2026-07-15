@@ -1,9 +1,10 @@
 import { enqueueMutation, readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
+import { storageKeyFor } from "@/lib/accountStorage";
 import { getProgrammeStartDate } from "@/lib/dashboardSelectors";
 import { getDhakaDateKey, getProgrammePosition } from "@/lib/dhakaClock";
 import type { BodyMeasurement, DigestionLevel, ProgressLocalState, ProgressPose, WeeklyCheckIn, WellbeingLevel } from "@/types/progress";
 
-const progressKey = "project-suiii:phase-5-progress";
+const progressKey = () => storageKeyFor("progress");
 
 export const defaultProgressState: ProgressLocalState = {
   version: 5,
@@ -23,7 +24,7 @@ function id(prefix: string) {
 export function readProgressState(): ProgressLocalState {
   if (typeof window === "undefined") return defaultProgressState;
   try {
-    const raw = window.localStorage.getItem(progressKey);
+    const raw = window.localStorage.getItem(progressKey());
     if (!raw) return defaultProgressState;
     const parsed = JSON.parse(raw) as Partial<ProgressLocalState>;
     if (parsed.version !== 5) return defaultProgressState;
@@ -35,11 +36,11 @@ export function readProgressState(): ProgressLocalState {
 
 export function writeProgressState(state: ProgressLocalState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(progressKey, JSON.stringify(state));
+  window.localStorage.setItem(progressKey(), JSON.stringify(state));
 }
 
 export function resetProgressStateForTests() {
-  if (typeof window !== "undefined") window.localStorage.removeItem(progressKey);
+  if (typeof window !== "undefined") window.localStorage.removeItem(progressKey());
 }
 
 function enqueue(entityType: "body_measurement" | "weekly_check_in", entityId: string, mutationType: "upsert" | "delete", payload: Record<string, unknown>) {

@@ -6,12 +6,13 @@ import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useAuthenticatedUser } from "@/components/auth/AuthenticatedUserProvider";
-import { ApiError, apiRequest, fetchSyncStatus, logout, NetworkError } from "@/lib/apiClient";
+import { logout } from "@/lib/apiClient";
+import { runTwoWaySync } from "@/lib/connectivity";
 import { downloadDeviceDataBackup, getDeviceDataSummary, type DeviceCategoryId, type DeviceCategorySummary, type DeviceDataSummary } from "@/lib/deviceData";
 import { buildMigrationPreview } from "@/lib/localMigration";
-import { mergePulledRecords } from "@/lib/syncMerge";
-import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
-import type { MigrationPreview, SyncEntityType, SyncPullResponse, SyncPushResponse } from "@/types/sync";
+import { disableOfflineAccountAccess } from "@/lib/offlineAccount";
+import { readSyncQueue } from "@/lib/syncQueue";
+import type { MigrationPreview, SyncEntityType } from "@/types/sync";
 
 export function SyncDataPage() {
   const authUser = useAuthenticatedUser();
@@ -65,67 +66,41 @@ export function SyncDataPage() {
     setSyncState("syncing");
     setSyncMessage("Syncing...");
     try {
-      const pending = currentQueue.pending;
-      let uploaded = 0;
-      let downloaded = 0;
-      let conflicts = 0;
-      let rejected = 0;
-      let nextPending = pending;
-      let nextFailed = currentQueue.failed;
-      if (pending.length > 0) {
-        const push = await apiRequest<SyncPushResponse>("/sync/push", {
-          method: "POST",
-          body: JSON.stringify({ mutations: pending })
-        });
-        const isConfirmed = (status: string) => status === "applied" || status === "duplicate" || status === "already_exists";
-        uploaded = push.results.filter((result) => isConfirmed(result.status)).length;
-        conflicts = push.results.filter((result) => result.status === "conflict" || result.status === "server_newer").length;
-        rejected = push.results.filter((result) => result.status === "rejected").length;
-        nextPending = pending.filter((mutation, index) => {
-          const result = push.results[index];
-          return !result || !isConfirmed(result.status);
-        });
-        const failedIds = new Set(nextFailed.map((mutation) => mutation.client_mutation_id));
-        nextFailed = [...nextFailed, ...nextPending.filter((mutation) => !failedIds.has(mutation.client_mutation_id))];
-      }
-      const pull = await apiRequest<SyncPullResponse>("/sync/pull");
-      const mergeResult = mergePulledRecords(pull.records, [...nextPending, ...nextFailed]);
-      downloaded = mergeResult.downloaded;
-      const status = await fetchSyncStatus();
-      const nextQueue = {
-        ...currentQueue,
-        pending: nextPending,
-        failed: nextFailed,
-        lastSyncAt: status.last_sync_at ?? new Date().toISOString(),
-        recentActivity: [`Sync completed: ${uploaded} uploaded, ${downloaded} downloaded, ${conflicts} conflicts, ${rejected} rejected`, ...currentQueue.recentActivity].slice(0, 5)
-      };
-      writeSyncQueue(nextQueue);
+      const result = await runTwoWaySync("manual");
+      const nextQueue = readSyncQueue();
       setQueue(nextQueue);
       setSummary(getDeviceDataSummary());
-      if (nextPending.length === 0 && conflicts === 0 && rejected === 0) {
+      if (result.status === "complete") {
         setSyncState("complete");
-        setSyncMessage(uploaded > 0 ? "Sync completed" : "All caught up");
-      } else {
+        setSyncMessage(result.uploaded > 0 ? `Sync completed: ${result.uploaded} uploaded, ${result.downloaded} downloaded` : "All caught up");
+      } else if (result.status === "attention") {
         setSyncState("attention");
-        setSyncMessage("Sync needs attention");
-      }
-    } catch (error) {
-      if (error instanceof NetworkError) {
+        setSyncMessage(`Sync needs attention: ${result.conflicts} conflicts, ${result.rejected} rejected`);
+      } else if (result.status === "offline") {
         setSyncState("offline");
-        setSyncMessage("Offline");
-      } else if (error instanceof ApiError && [401, 409, 422].includes(error.status)) {
+        setSyncMessage("Offline - changes retained");
+      } else if (result.status === "session_expired") {
         setSyncState("attention");
-        setSyncMessage("Sync needs attention");
+        setSyncMessage("Session expired");
+      } else if (result.status === "device_revoked") {
+        setSyncState("attention");
+        setSyncMessage("Device revoked");
       } else {
         setSyncState("server_unavailable");
         setSyncMessage("Server unavailable");
       }
+    } catch {
+      setSyncState("server_unavailable");
+      setSyncMessage("Server unavailable");
     } finally {
       inFlightSyncRef.current = false;
     }
   };
 
   const signOut = async () => {
+    const current = readSyncQueue();
+    if ((current.pending.length > 0 || current.failed.length > 0) && !window.confirm("You have unsynced changes on this device. Sign out anyway?")) return;
+    disableOfflineAccountAccess();
     try {
       await logout();
     } finally {
@@ -191,7 +166,7 @@ export function SyncDataPage() {
           {summary ? <p className="pb-3 text-suii-muted">{summary.totalSupportedRecords} local cached records · {summary.pendingSyncChanges} pending sync changes · {summary.legacyRecordsAwaitingImport} legacy records awaiting import</p> : null}
           <Action icon={<Database />} label="Export My Data" onClick={exportData} />
           <Action icon={<Database />} label="Review Device Data" onClick={() => { refreshDeviceData(); setReviewing(true); }} />
-          <button className="flex min-h-14 w-full items-center gap-3 py-3 text-left display text-suii-gold" onClick={signOut}><LogOut className="size-6" />Sign Out</button>
+          <button data-testid="sync-sign-out" className="flex min-h-14 w-full items-center gap-3 py-3 text-left display text-suii-gold" onClick={signOut}><LogOut className="size-6" />Sign Out</button>
         </section>
         {exportMessage ? <p className="card mt-4 p-4 text-suii-blue">{exportMessage}</p> : null}
         {summary ? (

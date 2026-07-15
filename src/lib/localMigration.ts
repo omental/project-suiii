@@ -1,7 +1,8 @@
+import { storageKeyFor } from "@/lib/accountStorage";
 import type { MigrationPreview, MigrationResponse, SyncMutation } from "@/types/sync";
 
-const phase2Key = "project-suiii:phase-2-nutrition";
-const phase3Key = "project-suiii:phase-3-training";
+const phase2Key = () => storageKeyFor("nutrition");
+const phase3Key = () => storageKeyFor("training");
 const migrationVersion = 1;
 const markerPrefix = "project-suiii:migration:v1";
 
@@ -105,8 +106,8 @@ export function hasCompletedMigration(accountId: string | null | undefined, devi
 }
 
 export function buildMigrationPreview(): MigrationPreview {
-  const nutrition = readJson(phase2Key);
-  const training = readJson(phase3Key);
+  const nutrition = readJson(phase2Key());
+  const training = readJson(phase3Key());
   const mealEntries = nutrition?.mealLogs && typeof nutrition.mealLogs === "object" ? Object.values(nutrition.mealLogs).filter((record) => isPendingLegacyRecord(record, nutrition.version, 2)) : [];
   const mealLogs = mealEntries.length;
   const sessions: LegacyWorkoutRecord[] = training?.sessions && typeof training.sessions === "object"
@@ -127,8 +128,8 @@ export function buildMigrationPreview(): MigrationPreview {
 }
 
 export function buildMigrationMutations(deviceId: string): SyncMutation[] {
-  const nutrition = readJson(phase2Key);
-  const training = readJson(phase3Key);
+  const nutrition = readJson(phase2Key());
+  const training = readJson(phase3Key());
   const now = new Date().toISOString();
   const mutations: SyncMutation[] = [];
   const mealLogs = nutrition?.mealLogs as Record<string, LegacyMealLog> | undefined;
@@ -208,17 +209,17 @@ export function completeConfirmedMigrationRecords(response: MigrationResponse, r
   const workoutIds = new Set(confirmed.filter((record) => record.entity_type === "workout_session").map((record) => String(record.payload.client_record_id)));
   const dailyDates = new Set(confirmed.filter((record) => record.entity_type === "daily_tracking").map((record) => String(record.payload.tracking_date ?? record.entity_id.replace(/^daily-/, ""))));
 
-  const nutrition = readJson(phase2Key);
+  const nutrition = readJson(phase2Key());
   if (nutrition?.mealLogs && typeof nutrition.mealLogs === "object") {
     const nextMealLogs = { ...(nutrition.mealLogs as Record<string, unknown>) };
     mealIds.forEach((id) => {
       const item = nextMealLogs[id];
       nextMealLogs[id] = item && typeof item === "object" ? { ...item as Record<string, unknown>, pendingMigration: false, migratedAt: new Date().toISOString() } : item;
     });
-    window.localStorage.setItem(phase2Key, JSON.stringify({ ...nutrition, mealLogs: nextMealLogs }));
+    window.localStorage.setItem(phase2Key(), JSON.stringify({ ...nutrition, mealLogs: nextMealLogs }));
   }
 
-  const training = readJson(phase3Key);
+  const training = readJson(phase3Key());
   if (training) {
     const nextSessions = training.sessions && typeof training.sessions === "object" ? { ...(training.sessions as Record<string, unknown>) } : {};
     const nextReadiness = training.readinessByDate && typeof training.readinessByDate === "object" ? { ...(training.readinessByDate as Record<string, unknown>) } : {};
@@ -230,7 +231,7 @@ export function completeConfirmedMigrationRecords(response: MigrationResponse, r
       const item = nextReadiness[date];
       nextReadiness[date] = item && typeof item === "object" ? { ...item as Record<string, unknown>, pendingMigration: false, migratedAt: new Date().toISOString() } : item;
     });
-    window.localStorage.setItem(phase3Key, JSON.stringify({ ...training, sessions: nextSessions, readinessByDate: nextReadiness }));
+    window.localStorage.setItem(phase3Key(), JSON.stringify({ ...training, sessions: nextSessions, readinessByDate: nextReadiness }));
   }
 
   return buildMigrationPreview();

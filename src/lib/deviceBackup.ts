@@ -1,7 +1,8 @@
 import { buildDeviceDataExport, type DeviceDataExportEnvelope } from "@/lib/deviceData";
+import { storageKeyFor } from "@/lib/accountStorage";
 
 const maxBackupBytes = 5 * 1024 * 1024;
-const restoreActivityKey = "project-suiii:device-restore-activity";
+const restoreActivityKey = () => storageKeyFor("restoreMeta");
 const supportedFormatVersion = 1;
 const allowedDataKeys = new Set(["dashboard", "nutrition", "training", "progress", "programmeProfile", "pendingSync"]);
 
@@ -93,11 +94,11 @@ export async function previewBackupFile(file: File): Promise<RestorePreview> {
 export function restoreAddMissing(preview: RestorePreview) {
   if (typeof window === "undefined" || preview.status !== "ready" || !preview.envelope) return;
   const data = preview.envelope.data as Record<string, unknown>;
-  restoreLocalStorageKey("project-suiii:phase-1-dashboard", data.dashboard);
-  restoreLocalStorageKey("project-suiii:phase-2-nutrition", data.nutrition);
-  restoreLocalStorageKey("project-suiii:phase-3-training", data.training);
-  restoreLocalStorageKey("project-suiii:phase-5-progress", data.progress);
-  restoreLocalStorageKey("project-suiii:programme-profile", data.programmeProfile);
+  restoreLocalStorageKey(storageKeyFor("dashboard"), data.dashboard);
+  restoreLocalStorageKey(storageKeyFor("nutrition"), data.nutrition);
+  restoreLocalStorageKey(storageKeyFor("training"), data.training);
+  restoreLocalStorageKey(storageKeyFor("progress"), data.progress);
+  restoreLocalStorageKey(storageKeyFor("programmeProfile"), data.programmeProfile);
   writeRestoreActivity(preview);
 }
 
@@ -115,7 +116,7 @@ function writeRestoreActivity(preview: RestorePreview) {
     conflicts: preview.conflicts,
     malformedRecords: preview.malformedRecords
   };
-  window.localStorage.setItem(restoreActivityKey, JSON.stringify(activity));
+  window.localStorage.setItem(restoreActivityKey(), JSON.stringify(activity));
 }
 
 function errorPreview(message: string): RestorePreview {

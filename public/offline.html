@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#050505" />
+    <title>Project SUIII Offline</title>
+    <style>
+      :root { color-scheme: dark; background: #050505; color: #f8fafc; font-family: Arial, sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+      main { width: min(430px, 100%); border: 1px solid rgba(255,255,255,.12); border-radius: 18px; padding: 22px; background: rgba(255,255,255,.04); }
+      h1 { margin: 0; font-size: 2rem; letter-spacing: .02em; }
+      h2 { margin: 8px 0 0; color: #c6ff24; font-size: 1.45rem; }
+      p, li { color: #cbd5e1; line-height: 1.5; }
+      ul { padding-left: 20px; }
+      a, button { display: block; width: 100%; box-sizing: border-box; min-height: 48px; margin-top: 10px; border-radius: 10px; border: 1px solid #c6ff24; background: #c6ff24; color: #050505; font-weight: 800; text-transform: uppercase; text-align: center; text-decoration: none; padding: 14px; }
+      button { cursor: pointer; }
+      .secondary { background: transparent; color: #c6ff24; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Project SUIII</h1>
+      <h2>You're offline</h2>
+      <p>Your unsynced changes stay on this device. This offline shell does not include profile, health, workout, meal, photo, session, or account data.</p>
+      <p>Available after this device has safe local state:</p>
+      <ul>
+        <li>Continue an active workout</li>
+        <li>Review locally cached meals</li>
+        <li>Review pending changes</li>
+        <li>Export device data</li>
+      </ul>
+      <p>Requires connection: account verification, server profile updates, sync, reports, and device management.</p>
+      <button type="button" onclick="window.location.reload()">Retry connection</button>
+      <a class="secondary" href="/sync">Review pending changes</a>
+      <a class="secondary" href="/">Open local dashboard</a>
+    </main>
+  </body>
+</html>

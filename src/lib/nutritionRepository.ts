@@ -11,6 +11,7 @@ import {
   roundNutrition,
   summarizeDay
 } from "@/lib/nutritionCalc";
+import { storageKeyFor } from "@/lib/accountStorage";
 import type {
   IngredientLog,
   MealLog,
@@ -20,8 +21,8 @@ import type {
   WeighingSession
 } from "@/types/nutrition";
 
-const phase1Key = "project-suiii:phase-1-dashboard";
-const phase2Key = "project-suiii:phase-2-nutrition";
+const phase1Key = () => storageKeyFor("dashboard");
+const phase2Key = () => storageKeyFor("nutrition");
 
 export const defaultPhase2State: Phase2LocalState = {
   version: 2,
@@ -54,7 +55,7 @@ function isPhase2State(value: unknown): value is Phase2LocalState {
 function readPhase1State() {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(phase1Key);
+    const raw = window.localStorage.getItem(phase1Key());
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<Phase2LocalState>;
     return {
@@ -74,7 +75,7 @@ function readPhase1State() {
 export function readNutritionState(): Phase2LocalState {
   if (typeof window === "undefined") return defaultPhase2State;
   try {
-    const raw = window.localStorage.getItem(phase2Key);
+    const raw = window.localStorage.getItem(phase2Key());
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (isPhase2State(parsed)) {
@@ -90,13 +91,13 @@ export function readNutritionState(): Phase2LocalState {
 
 export function writeNutritionState(state: Phase2LocalState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(phase2Key, JSON.stringify(state));
+  window.localStorage.setItem(phase2Key(), JSON.stringify(state));
 }
 
 export function resetNutritionStateForTests() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(phase2Key);
-  window.localStorage.removeItem(phase1Key);
+  window.localStorage.removeItem(phase2Key());
+  window.localStorage.removeItem(phase1Key());
 }
 
 export function makeRepository(state: Phase2LocalState) {

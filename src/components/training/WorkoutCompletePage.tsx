@@ -54,6 +54,7 @@ export function WorkoutCompletePage({ sessionId }: { sessionId: string }) {
           <p className="display mt-4 text-sm text-suii-muted">Project SUIII</p>
           <h1 className="display mt-2 text-5xl text-suii-lime">{session.status === "partial" ? "Workout Saved" : "Workout Complete"}</h1>
           <p className="display mt-1 text-suii-muted">{workout.name} · {workout.dayName}</p>
+          <p className="mt-2 text-sm text-suii-blue">Saved on this device. Sync will upload it after a confirmed connection.</p>
         </div>
 
         <section className="card mt-6 grid grid-cols-4 gap-2 p-3">

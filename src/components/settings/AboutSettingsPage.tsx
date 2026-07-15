@@ -1,6 +1,7 @@
 "use client";
 
 import { SettingsChrome } from "@/components/settings/SettingsChrome";
+import { InstallAndUpdateCard } from "@/components/pwa/InstallAndUpdateCard";
 
 export function AboutSettingsPage() {
   return (
@@ -10,6 +11,9 @@ export function AboutSettingsPage() {
         <p className="mt-2 text-suii-muted">Project SUIII stores authenticated profile settings on the backend and keeps local device records private to this browser until sync or export actions are chosen.</p>
         <p className="mt-3 text-sm text-suii-muted">Production deployment details and credentials are intentionally not included in the app source.</p>
       </section>
+      <div className="mt-4">
+        <InstallAndUpdateCard />
+      </div>
     </SettingsChrome>
   );
 }

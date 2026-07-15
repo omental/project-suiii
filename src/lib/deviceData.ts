@@ -1,12 +1,13 @@
 import { buildMigrationPreview, readMigrationCompletionMarker } from "@/lib/localMigration";
+import { storageKeyFor } from "@/lib/accountStorage";
 import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
 
-const phase1Key = "project-suiii:phase-1-dashboard";
-const phase2Key = "project-suiii:phase-2-nutrition";
-const phase3Key = "project-suiii:phase-3-training";
-const progressKey = "project-suiii:phase-5-progress";
-const programmeProfileKey = "project-suiii:programme-profile";
-const exportMetaKey = "project-suiii:device-export-meta";
+const phase1Key = () => storageKeyFor("dashboard");
+const phase2Key = () => storageKeyFor("nutrition");
+const phase3Key = () => storageKeyFor("training");
+const progressKey = () => storageKeyFor("progress");
+const programmeProfileKey = () => storageKeyFor("programmeProfile");
+const exportMetaKey = () => storageKeyFor("exportMeta");
 
 export type DeviceCategoryId = "nutrition" | "workouts" | "daily_tracking" | "measurements" | "check_ins" | "photos" | "pending_sync" | "dashboard";
 
@@ -217,21 +218,26 @@ function abbreviateDeviceId(deviceId: string) {
 }
 
 export function getDeviceDataSummary(): DeviceDataSummary {
-  const nutrition = readJson(phase2Key);
-  const training = readJson(phase3Key);
-  const progress = readJson(progressKey);
-  const phase1 = readJson(phase1Key);
-  const profile = readJson(programmeProfileKey);
+  const dashboardKey = phase1Key();
+  const nutritionKey = phase2Key();
+  const trainingKey = phase3Key();
+  const progressStorageKey = progressKey();
+  const profileKey = programmeProfileKey();
+  const nutrition = readJson(nutritionKey);
+  const training = readJson(trainingKey);
+  const progress = readJson(progressStorageKey);
+  const phase1 = readJson(dashboardKey);
+  const profile = readJson(profileKey);
   const queue = readSyncQueue();
-  const exportMeta = readJson(exportMetaKey);
+  const exportMeta = readJson(exportMetaKey());
 
   const malformedRecords: DeviceRecordSummary[] = [];
-  const meals = nutrition.ok ? objectValues(nutrition.value?.mealLogs).map(summarizeMeal) : [malformedRecord("nutrition", phase2Key, "Nutrition storage", nutrition.raw)];
-  const workouts = training.ok ? objectValues(training.value?.sessions).map(summarizeWorkout) : [malformedRecord("workouts", phase3Key, "Training storage", training.raw)];
+  const meals = nutrition.ok ? objectValues(nutrition.value?.mealLogs).map(summarizeMeal) : [malformedRecord("nutrition", nutritionKey, "Nutrition storage", nutrition.raw)];
+  const workouts = training.ok ? objectValues(training.value?.sessions).map(summarizeWorkout) : [malformedRecord("workouts", trainingKey, "Training storage", training.raw)];
   const readiness = training.ok && training.value?.readinessByDate && typeof training.value.readinessByDate === "object"
     ? Object.entries(training.value.readinessByDate as Record<string, Record<string, unknown>>).map(([date, item]) => summarizeReadiness(item, date))
     : [];
-  const measurements = progress.ok ? objectValues(progress.value?.measurements).map(summarizeMeasurement) : [malformedRecord("measurements", progressKey, "Progress storage", progress.raw)];
+  const measurements = progress.ok ? objectValues(progress.value?.measurements).map(summarizeMeasurement) : [malformedRecord("measurements", progressStorageKey, "Progress storage", progress.raw)];
   const checkIns = progress.ok ? objectValues(progress.value?.checkIns).map(summarizeCheckIn) : [];
   const photos = progress.ok ? objectValues(progress.value?.photos).map(summarizePhoto) : [];
   const pending = [...queue.pending, ...queue.failed].map((item, index) => ({
@@ -252,7 +258,7 @@ export function getDeviceDataSummary(): DeviceDataSummary {
     category("check_ins", "Weekly check-ins", checkIns),
     category("photos", "Progress photos", photos),
     category("pending_sync", "Pending sync changes", pending),
-    category("dashboard", "Dashboard profile", phase1.ok && phase1.value ? [{ id: phase1Key, categoryId: "dashboard", title: "Dashboard local state", subtitle: "Water, cigarettes and timeline state", date: null, status: "local", technicalDetails: { hasLocalState: true } }] : [])
+    category("dashboard", "Dashboard profile", phase1.ok && phase1.value ? [{ id: dashboardKey, categoryId: "dashboard", title: "Dashboard local state", subtitle: "Water, cigarettes and timeline state", date: null, status: "local", technicalDetails: { hasLocalState: true } }] : [])
   ];
   categories.forEach((item) => malformedRecords.push(...item.records.filter((record) => record.status === "needs_attention")));
   const preview = buildMigrationPreview();
@@ -288,11 +294,11 @@ export function buildDeviceDataExport(now = new Date()): DeviceDataExportEnvelop
   const queue = readSyncQueue();
   const summary = getDeviceDataSummary();
   const categories = summary.categories.map(({ records, ...item }) => item);
-  const dashboard = readJson(phase1Key);
-  const nutrition = readJson(phase2Key);
-  const training = readJson(phase3Key);
-  const progress = readJson(progressKey);
-  const profile = readJson(programmeProfileKey);
+  const dashboard = readJson(phase1Key());
+  const nutrition = readJson(phase2Key());
+  const training = readJson(phase3Key());
+  const progress = readJson(progressKey());
+  const profile = readJson(programmeProfileKey());
   const data = {
     dashboard: dashboard.ok ? dashboard.value : null,
     nutrition: nutrition.ok ? nutrition.value : null,
@@ -321,7 +327,7 @@ export function backupFilename(now = new Date()) {
 
 export function markDeviceDataExported(exportedAt: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(exportMetaKey, JSON.stringify({ lastExportAt: exportedAt }));
+  window.localStorage.setItem(exportMetaKey(), JSON.stringify({ lastExportAt: exportedAt }));
 }
 
 export function downloadDeviceDataBackup(now = new Date()) {

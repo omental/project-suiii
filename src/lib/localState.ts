@@ -1,7 +1,8 @@
 import { defaultLocalState } from "@/data/dashboard";
+import { storageKeyFor } from "@/lib/accountStorage";
 import type { DashboardLocalState } from "@/types/dashboard";
 
-const storageKey = "project-suiii:phase-1-dashboard";
+const storageKey = () => storageKeyFor("dashboard");
 
 function isLocalState(value: unknown): value is DashboardLocalState {
   if (!value || typeof value !== "object") {
@@ -25,7 +26,7 @@ export function readLocalState(): DashboardLocalState {
   }
 
   try {
-    const raw = window.localStorage.getItem(storageKey);
+    const raw = window.localStorage.getItem(storageKey());
     if (!raw) {
       return defaultLocalState;
     }
@@ -53,11 +54,11 @@ export function writeLocalState(state: DashboardLocalState) {
     return;
   }
 
-  window.localStorage.setItem(storageKey, JSON.stringify(state));
+  window.localStorage.setItem(storageKey(), JSON.stringify(state));
 }
 
 export function resetLocalStateForTests() {
   if (typeof window !== "undefined") {
-    window.localStorage.removeItem(storageKey);
+    window.localStorage.removeItem(storageKey());
   }
 }
