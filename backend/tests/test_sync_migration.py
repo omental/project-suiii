@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.meal_log import MealLog
 from app.models.migration_batch import MigrationBatch
 from app.models.sync_device import SyncDevice
 from app.models.sync_mutation import SyncMutation
-from app.schemas.sync import MigrationPreview, MigrationRequest, MutationRequest
+from app.schemas.sync import MigrationPreview, MigrationRequest, MutationRequest, MutationResult
 from app.services.sync_service import SyncService, SyncValidationError, parse_local_date, parse_utc_datetime
 
 
@@ -34,6 +37,8 @@ class FakeSession:
     def __init__(self, *, fail_flush: bool = False) -> None:
         self.fail_flush = fail_flush
         self.rollback_called = False
+        self.rollback_count = 0
+        self.commit_count = 0
         self.pending: list[Any] = []
         self.devices: dict[tuple[uuid.UUID, str], SyncDevice] = {}
         self.mutations: dict[tuple[uuid.UUID, str], SyncMutation] = {}
@@ -49,7 +54,11 @@ class FakeSession:
 
     async def rollback(self) -> None:
         self.rollback_called = True
+        self.rollback_count += 1
         self.pending.clear()
+
+    async def commit(self) -> None:
+        self.commit_count += 1
 
     def add(self, record: object) -> None:
         self.pending.append(record)
@@ -89,6 +98,67 @@ class FakeSession:
             elif isinstance(record, MigrationBatch):
                 self.batches.append(record)
         self.pending.clear()
+
+
+class AutobeginAsyncSession(AsyncSession):
+    """Real AsyncSession transaction state without requiring an external test database."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.commit_count = 0
+        self.rollback_count = 0
+        self.added: list[object] = []
+
+    async def execute(self, statement: Any, *args: Any, **kwargs: Any) -> object:
+        if not self.in_transaction():
+            self.sync_session.begin()
+        return SimpleNamespace(statement=statement, args=args, kwargs=kwargs)
+
+    def add(self, instance: object, _warn: bool = True) -> None:
+        self.added.append(instance)
+
+    async def flush(self, objects: Any = None) -> None:
+        now = datetime.now(UTC)
+        for record in self.added:
+            if getattr(record, "id", None) is None:
+                record.id = uuid.uuid4()
+            if getattr(record, "created_at", None) is None:
+                record.created_at = now
+            if getattr(record, "updated_at", None) is None:
+                record.updated_at = now
+        return None
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+        await super().commit()
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+        await super().rollback()
+
+
+class LifecycleSyncService(SyncService):
+    def __init__(self, db: AutobeginAsyncSession) -> None:
+        super().__init__(db)
+        self.seen_mutations: set[str] = set()
+        self.applied_count = 0
+
+    async def ensure_device(self, user_id: uuid.UUID, device_id: str, device_name: str) -> Any:
+        return SimpleNamespace(last_sync_at=None)
+
+    async def apply_mutation(self, user_id: uuid.UUID, mutation: MutationRequest) -> MutationResult:
+        status = "duplicate" if mutation.client_mutation_id in self.seen_mutations else "applied"
+        self.seen_mutations.add(mutation.client_mutation_id)
+        if status == "applied":
+            self.applied_count += 1
+        return MutationResult(
+            mutation_id=uuid.UUID(int=0),
+            entity_type=mutation.entity_type,
+            entity_id=mutation.entity_id,
+            status=status,
+            server_version=1,
+            payload={"id": mutation.entity_id, "updated_at": datetime.now(UTC).isoformat()},
+        )
 
 
 def preview(total: int = 1) -> MigrationPreview:
@@ -140,6 +210,33 @@ def test_parse_helpers_reject_bad_and_naive_values() -> None:
 
 
 @pytest.mark.asyncio
+async def test_real_async_session_autobegun_transaction_migrates_and_retries() -> None:
+    session = AutobeginAsyncSession()
+    service = LifecycleSyncService(session)
+
+    await session.execute(text("SELECT 1"))
+    assert session.in_transaction() is True
+
+    first = await service.migrate_local_data(USER_ID, migration([meal_mutation()]))
+    assert first.imported_records == 1
+    assert session.commit_count == 1
+    assert session.rollback_count == 0
+    assert session.in_transaction() is False
+
+    await session.execute(text("SELECT 1"))
+    assert session.in_transaction() is True
+    retry = await service.migrate_local_data(USER_ID, migration([meal_mutation()]))
+
+    assert retry.imported_records == 1
+    assert service.applied_count == 1
+    assert session.commit_count == 2
+    assert session.rollback_count == 0
+    await session.execute(text("SELECT 1"))
+    assert session.in_transaction() is True
+    await session.rollback()
+
+
+@pytest.mark.asyncio
 async def test_migrate_exact_production_meal_payload_and_retry_is_idempotent() -> None:
     session = FakeSession()
     service = SyncService(session)  # type: ignore[arg-type]
@@ -150,6 +247,7 @@ async def test_migrate_exact_production_meal_payload_and_retry_is_idempotent() -
     meal = session.meals[(USER_ID, "2026-07-15:pre-badminton")]
     assert first.imported_records == 1
     assert retry.imported_records == 1
+    assert session.commit_count == 2
     assert len(session.meals) == 1
     assert meal.local_date == date(2026, 7, 15)
     assert meal.started_at == datetime(2026, 7, 15, 6, 8, 30, 92000, tzinfo=UTC)
@@ -168,6 +266,8 @@ async def test_invalid_record_is_rejected_and_later_query_still_runs() -> None:
     assert response.status == "completed_with_errors"
     assert response.error_records == 1
     assert response.imported_records == 1
+    assert session.commit_count == 1
+    assert session.rollback_count == 0
     assert session.query_count > 1
     assert response.summary["rejected_items"][0]["code"] == "invalid_local_date"
 
@@ -206,6 +306,8 @@ async def test_database_flush_failure_rolls_back_and_returns_safe_error() -> Non
         await service.migrate_local_data(USER_ID, migration([meal_mutation()]))
 
     assert session.rollback_called is True
+    assert session.rollback_count == 1
+    assert session.commit_count == 0
     assert raised.value.status_code == 500
     assert "INSERT" not in raised.value.detail
     assert "traceback" not in str(raised.value.detail).casefold()

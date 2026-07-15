@@ -309,51 +309,55 @@ class SyncService:
         imported = skipped = conflicts = errors = 0
         rejected: list[dict[str, Any]] = []
         try:
-            async with self.db.begin():
-                device = await self.ensure_device(user_id, request.device_id, request.device_name)
-                for mutation in request.records:
-                    try:
-                        async with self.db.begin_nested():
-                            result = await self.apply_mutation(user_id, mutation)
-                        if result.status in {"applied", "duplicate"}:
-                            imported += 1
-                        elif result.status == "conflict":
-                            conflicts += 1
-                    except SyncValidationError as exc:
-                        errors += 1
-                        rejected.append(
-                            {
-                                "record_type": mutation.entity_type,
-                                "client_record_id": payload_value(mutation.payload, "client_record_id", "id") or mutation.entity_id,
-                                "status": "rejected",
-                                "code": exc.code,
-                                "message": exc.message,
-                            }
-                        )
-                summary = request.preview.model_dump(mode="json")
-                summary["transaction_strategy"] = "partial_import_with_per_record_savepoints"
-                if rejected:
-                    summary["rejected_items"] = rejected
-                batch = MigrationBatch(
-                    user_id=user_id,
-                    device_id=request.device_id,
-                    conflict_policy=request.conflict_policy,
-                    status="completed" if errors == 0 else "completed_with_errors",
-                    total_records=request.preview.total_records,
-                    imported_records=imported,
-                    skipped_records=skipped,
-                    conflict_records=conflicts,
-                    error_records=errors,
-                    summary=summary,
-                    completed_at=utc_now(),
-                )
-                self.db.add(batch)
-                device.last_sync_at = utc_now()
-                await self.db.flush()
+            device = await self.ensure_device(user_id, request.device_id, request.device_name)
+            for mutation in request.records:
+                try:
+                    async with self.db.begin_nested():
+                        result = await self.apply_mutation(user_id, mutation)
+                    if result.status in {"applied", "duplicate"}:
+                        imported += 1
+                    elif result.status == "conflict":
+                        conflicts += 1
+                except SyncValidationError as exc:
+                    errors += 1
+                    rejected.append(
+                        {
+                            "record_type": mutation.entity_type,
+                            "client_record_id": payload_value(mutation.payload, "client_record_id", "id") or mutation.entity_id,
+                            "status": "rejected",
+                            "code": exc.code,
+                            "message": exc.message,
+                        }
+                    )
+            summary = request.preview.model_dump(mode="json")
+            summary["transaction_strategy"] = "request_transaction_with_per_record_savepoints"
+            if rejected:
+                summary["rejected_items"] = rejected
+            batch = MigrationBatch(
+                user_id=user_id,
+                device_id=request.device_id,
+                conflict_policy=request.conflict_policy,
+                status="completed" if errors == 0 else "completed_with_errors",
+                total_records=request.preview.total_records,
+                imported_records=imported,
+                skipped_records=skipped,
+                conflict_records=conflicts,
+                error_records=errors,
+                summary=summary,
+                completed_at=utc_now(),
+            )
+            self.db.add(batch)
+            device.last_sync_at = utc_now()
+            await self.db.flush()
+            await self.db.commit()
         except SQLAlchemyError as exc:
             await self.db.rollback()
             logger.exception("sync_migration_database_failure", extra={"user_id": str(user_id), "device_id": request.device_id})
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Migration failed. Please try again shortly.") from exc
+        except Exception:
+            await self.db.rollback()
+            logger.exception("sync_migration_unexpected_failure", extra={"user_id": str(user_id), "device_id": request.device_id})
+            raise
         return MigrationResponse(
             batch_id=batch.id,
             status=batch.status,
