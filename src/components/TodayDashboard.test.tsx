@@ -19,15 +19,15 @@ describe("TodayDashboard", () => {
     vi.useRealTimers();
   });
 
-  it("renders the Today dashboard and transformation values", () => {
+  it("renders the Today dashboard without private identity fallback values", () => {
     render(<TodayDashboard />);
 
-    expect(screen.getByRole("heading", { name: /good morning, mubasshir/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /good morning, athlete/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /project suiii/i })).toBeInTheDocument();
-    expect(screen.getByText(/79.0 kg/i)).toBeInTheDocument();
-    expect(screen.getByText(/73-74 kg/i)).toBeInTheDocument();
-    expect(screen.getByText(/38.5 in/i)).toBeInTheDocument();
-    expect(screen.getByText(/35 in/i)).toBeInTheDocument();
+    expect(screen.queryByText(/mubasshir/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/79.0 kg/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(["73", "74"].join("-") + " kg", "i"))).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(["38", "5"].join(".") + " in", "i"))).not.toBeInTheDocument();
   });
 
   it("links the next action to the Phase 2 weighing workflow", () => {
@@ -53,12 +53,12 @@ describe("TodayDashboard", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<TodayDashboard />);
 
-    expect(screen.getByText(/Water: 0.0 of 3.0 L/i)).toBeInTheDocument();
+    expect(screen.getByText(/Water: 0.0 of 2.5 L/i)).toBeInTheDocument();
     const waterControl = screen.getByRole("group", { name: /water quick actions/i });
     await user.click(within(waterControl).getByRole("button", { name: /\+250 ml/i }));
-    expect(screen.getByText(/Water: 0.3 of 3.0 L/i)).toBeInTheDocument();
+    expect(screen.getByText(/Water: 0.3 of 2.5 L/i)).toBeInTheDocument();
     await user.click(within(waterControl).getByRole("button", { name: /undo/i }));
-    expect(screen.getByText(/Water: 0.0 of 3.0 L/i)).toBeInTheDocument();
+    expect(screen.getByText(/Water: 0.0 of 2.5 L/i)).toBeInTheDocument();
   });
 
   it("increments and undoes cigarettes while preventing negative values", async () => {
@@ -70,9 +70,9 @@ describe("TodayDashboard", () => {
     expect(undo).toBeDisabled();
 
     await user.click(within(cigaretteControl).getByRole("button", { name: /\+1/i }));
-    expect(screen.getByText(/Cigarettes: 1 of 12/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cigarettes: 1 of 10/i)).toBeInTheDocument();
     await user.click(undo);
-    expect(screen.getByText(/Cigarettes: 0 of 12/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cigarettes: 0 of 10/i)).toBeInTheDocument();
     expect(undo).toBeDisabled();
   });
 

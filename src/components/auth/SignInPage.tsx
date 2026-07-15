@@ -10,7 +10,7 @@ import { readSyncQueue } from "@/lib/syncQueue";
 
 export function SignInPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("mubasshir@example.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
@@ -43,7 +43,7 @@ export function SignInPage() {
           <h1 className="display text-6xl leading-none text-suii-gold">SUIII</h1>
           <p className="display mt-2 text-sm text-suii-gold">Build Your Ultimate Form</p>
           <h2 className="display mt-12 text-6xl leading-none">Welcome Back</h2>
-          <p className="mt-3 text-suii-muted">Your transformation continues here.</p>
+          <p className="mt-3 text-suii-muted">Your private training space continues here.</p>
         </section>
 
         <form onSubmit={submit} className="card mt-8 border-suii-lime/60 p-5">
@@ -86,7 +86,7 @@ export function SignInPage() {
           </div>
         </section>
         <p className="display mt-10 text-center text-suii-gold">Private Fitness System</p>
-        <p className="mt-2 text-center text-suii-muted">suiii.muba.me</p>
+        <p className="mt-2 text-center text-suii-muted">Private account access</p>
       </div>
     </main>
   );

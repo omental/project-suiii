@@ -109,8 +109,8 @@ describe("dashboardSelectors", () => {
           clientRecordId: "m1",
           measuredAt: "2026-07-15T00:00:00.000Z",
           localDate: "2026-07-15",
-          weightKg: 76.25,
-          waistIn: 36.75,
+          weightKg: 75,
+          waistIn: 37,
           chestIn: null,
           armIn: null,
           thighIn: null,
@@ -120,6 +120,11 @@ describe("dashboardSelectors", () => {
           deletedAt: null
         }
       }
+    }, {
+      startingWeightKg: 80,
+      targetWeightKg: 70,
+      startingWaistIn: 40,
+      targetWaistIn: 34
     })).toBe(50);
   });
 

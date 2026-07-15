@@ -7,10 +7,13 @@ import type { ProgressLocalState } from "@/types/progress";
 import type { Phase3TrainingState } from "@/types/training";
 
 const programmeProfileKey = "project-suiii:programme-profile";
-const startingWeightKg = 79;
-const targetWeightMidpointKg = 73.5;
-const startingWaistIn = 38.5;
-const targetWaistIn = 35;
+
+export type TransformationReference = {
+  startingWeightKg?: number | null;
+  targetWeightKg?: number | null;
+  startingWaistIn?: number | null;
+  targetWaistIn?: number | null;
+};
 
 export type NextDashboardAction = {
   id: string;
@@ -62,18 +65,32 @@ export function calculateActiveStreak(activityDates: string[], todayDateKey: str
   return streak;
 }
 
-export function calculateTransformationProgress(progress: ProgressLocalState) {
+export function calculateTransformationProgress(progress: ProgressLocalState, reference: TransformationReference | null = null) {
   const latest = Object.values(progress.measurements)
     .filter((measurement) => !measurement.deletedAt)
     .sort((a, b) => a.measuredAt.localeCompare(b.measuredAt))
     .at(-1);
   if (!latest) return 0;
   const values: number[] = [];
-  if (latest.weightKg !== null) {
-    values.push(((startingWeightKg - latest.weightKg) / (startingWeightKg - targetWeightMidpointKg)) * 100);
+  if (
+    latest.weightKg !== null &&
+    reference?.startingWeightKg !== null &&
+    reference?.targetWeightKg !== null &&
+    reference?.startingWeightKg !== undefined &&
+    reference?.targetWeightKg !== undefined &&
+    reference.startingWeightKg !== reference.targetWeightKg
+  ) {
+    values.push(((reference.startingWeightKg - latest.weightKg) / (reference.startingWeightKg - reference.targetWeightKg)) * 100);
   }
-  if (latest.waistIn !== null) {
-    values.push(((startingWaistIn - latest.waistIn) / (startingWaistIn - targetWaistIn)) * 100);
+  if (
+    latest.waistIn !== null &&
+    reference?.startingWaistIn !== null &&
+    reference?.targetWaistIn !== null &&
+    reference?.startingWaistIn !== undefined &&
+    reference?.targetWaistIn !== undefined &&
+    reference.startingWaistIn !== reference.targetWaistIn
+  ) {
+    values.push(((reference.startingWaistIn - latest.waistIn) / (reference.startingWaistIn - reference.targetWaistIn)) * 100);
   }
   if (values.length === 0) return 0;
   return clampPercent(values.reduce((sum, value) => sum + clampPercent(value), 0) / values.length);

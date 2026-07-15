@@ -1,21 +1,24 @@
 "use client";
 
-import { Cloud, Database, Dumbbell, Droplets, LogOut, RefreshCcw, Settings, Shield, Target, Utensils } from "lucide-react";
+import { Cloud, Database, Dumbbell, Droplets, LogOut, Settings, Shield, Target, Utensils } from "lucide-react";
 import Link from "next/link";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { useAuthenticatedUser } from "@/components/auth/AuthenticatedUserProvider";
 import { ApiError, apiRequest, fetchSyncStatus, logout, NetworkError } from "@/lib/apiClient";
-import { downloadDeviceDataBackup, getDeviceDataSummary, type DeviceCategorySummary, type DeviceDataSummary } from "@/lib/deviceData";
+import { downloadDeviceDataBackup, getDeviceDataSummary, type DeviceCategoryId, type DeviceCategorySummary, type DeviceDataSummary } from "@/lib/deviceData";
 import { buildMigrationPreview } from "@/lib/localMigration";
 import { mergePulledRecords } from "@/lib/syncMerge";
 import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
-import type { MigrationPreview, SyncPullResponse, SyncPushResponse } from "@/types/sync";
+import type { MigrationPreview, SyncEntityType, SyncPullResponse, SyncPushResponse } from "@/types/sync";
 
 export function SyncDataPage() {
+  const authUser = useAuthenticatedUser();
   const [preview, setPreview] = useState<MigrationPreview>({ meal_logs: 0, workout_sessions: 0, daily_check_ins: 0, sets: 0, date_range: "No local records", total_records: 0 });
   const [queue, setQueue] = useState(readSyncQueue());
   const [summary, setSummary] = useState<DeviceDataSummary | null>(null);
+  const [browserOnline, setBrowserOnline] = useState(true);
   const [reviewing, setReviewing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState("");
@@ -23,17 +26,27 @@ export function SyncDataPage() {
   const [syncMessage, setSyncMessage] = useState("");
   const inFlightSyncRef = useRef(false);
 
-  useEffect(() => {
-    // Local sync queue data is only available after hydration.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refreshDeviceData();
-  }, []);
-
-  const refreshDeviceData = () => {
+  function refreshDeviceData() {
     setPreview(buildMigrationPreview());
     setQueue(readSyncQueue());
     setSummary(getDeviceDataSummary());
-  };
+  }
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(refreshDeviceData, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    const updateOnlineState = () => setBrowserOnline(typeof navigator === "undefined" ? true : navigator.onLine);
+    updateOnlineState();
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
+    };
+  }, []);
 
   const exportData = () => {
     try {
@@ -120,6 +133,13 @@ export function SyncDataPage() {
     }
   };
 
+  const accountName = authUser.full_name.trim() || authUser.email || "Authenticated athlete";
+  const syncHeadline = syncState === "syncing"
+    ? "Syncing..."
+    : syncMessage || (queue.pending.length === 0 && queue.failed.length === 0 && queue.lastSyncAt && syncState === "complete" ? "All Caught Up" : "Sync Needs Attention");
+  const connectionLabel = browserOnline ? "Browser online" : "Browser offline";
+  const statusByEntity = buildStatusByEntity(queue);
+
   return (
     <AppShell>
       <div className="px-4 py-5">
@@ -135,42 +155,41 @@ export function SyncDataPage() {
           <div className="flex items-center gap-4">
             <Cloud className="size-20 text-suii-lime" />
             <div>
-              <h2 className="display text-3xl text-suii-lime">{syncState === "syncing" ? "Syncing..." : syncMessage || (queue.pending.length === 0 && queue.failed.length === 0 && queue.lastSyncAt ? "All Caught Up" : "Sync Needs Attention")}</h2>
+              <h2 className="display text-3xl text-suii-lime">{syncHeadline}</h2>
               <p className="text-suii-muted">Last synced {queue.lastSyncAt ? new Date(queue.lastSyncAt).toLocaleString() : "not yet"}</p>
-              <span className="mt-2 inline-flex rounded border border-suii-lime px-3 py-1 display text-suii-lime">Online</span>
+              <span className="mt-2 inline-flex rounded border border-suii-lime px-3 py-1 display text-suii-lime">{connectionLabel}</span>
             </div>
           </div>
           <button onClick={syncNow} disabled={syncState === "syncing"} className="focus-ring rounded-lg border border-suii-lime px-4 py-3 display text-suii-lime disabled:opacity-60">Sync Now</button>
         </section>
         <section className="card mt-4 p-4">
           <p className="display text-suii-gold">Private Account</p>
-          <h2 className="display text-3xl">J.M. Mubasshir Rahman</h2>
-          <p className="text-suii-muted">mubasshir@example.com</p>
+          <h2 className="display text-3xl">{accountName}</h2>
+          <p className="text-suii-muted">{authUser.email}</p>
           <p className="display mt-2 text-suii-gold">This device · {queue.deviceName}</p>
         </section>
         <section className="card mt-4 divide-y divide-white/10 p-4">
-          <SyncRow icon={<Utensils />} title="Meals" detail={`${summary?.categories.find((item) => item.id === "nutrition")?.total ?? 0} cached · ${preview.meal_logs} legacy`} />
-          <SyncRow icon={<Dumbbell />} title="Workouts" detail={`${summary?.categories.find((item) => item.id === "workouts")?.total ?? 0} cached · ${preview.workout_sessions} legacy`} />
-          <SyncRow icon={<Droplets />} title="Daily Tracking" detail="Water · Cigarettes · Sleep" />
-          <SyncRow icon={<Target />} title="Profile & Goals" detail="Weight · Waist · Targets" />
+          <SyncRow icon={<Utensils />} title="Meals" detail={`${categoryTotal(summary, "nutrition")} cached · ${preview.meal_logs} legacy`} status={categoryStatus(summary, "nutrition", ["meal_log"], statusByEntity)} />
+          <SyncRow icon={<Dumbbell />} title="Workouts" detail={`${categoryTotal(summary, "workouts")} cached · ${preview.workout_sessions} legacy`} status={categoryStatus(summary, "workouts", ["workout_session"], statusByEntity)} />
+          <SyncRow icon={<Droplets />} title="Daily Tracking" detail={`${categoryTotal(summary, "daily_tracking")} cached · ${preview.daily_check_ins} legacy`} status={categoryStatus(summary, "daily_tracking", ["daily_tracking"], statusByEntity)} />
+          <SyncRow icon={<Target />} title="Profile & Goals" detail={`${categoryTotal(summary, "measurements") + categoryTotal(summary, "check_ins")} cached`} status={categoryStatus(summary, "measurements", ["profile", "body_measurement", "weekly_check_in"], statusByEntity)} />
         </section>
         <section className="card mt-4 flex gap-4 border-suii-blue/40 p-4">
           <Cloud className="size-16 text-suii-blue" />
           <div>
-            <h2 className="display text-2xl text-suii-blue">Offline Ready</h2>
-            <p className="text-suii-muted">You can log meals and workouts without internet. Changes upload automatically when you reconnect.</p>
+            <h2 className="display text-2xl text-suii-blue">Local Data Available</h2>
+            <p className="text-suii-muted">Saved device records remain available here. Use Sync Now after you are signed in and connected to upload or pull changes.</p>
             <p className="display mt-3 text-suii-blue">{queue.pending.length} Pending Sync Changes</p>
           </div>
         </section>
         <section className="card mt-4 p-4">
           <h2 className="display text-2xl">Recent Activity</h2>
-          {(queue.recentActivity.length ? queue.recentActivity : ["Workout feedback updated", "Full Body A uploaded", "Evening snack uploaded"]).map((item) => <p key={item} className="mt-3 text-suii-muted">✓ {item}</p>)}
+          {queue.recentActivity.length ? queue.recentActivity.map((item) => <p key={item} className="mt-3 text-suii-muted">✓ {item}</p>) : <p className="mt-3 text-suii-muted">No sync activity yet.</p>}
         </section>
         <section className="card mt-4 divide-y divide-white/10 p-4">
           <h2 className="display pb-3 text-2xl">Device Data</h2>
           {summary ? <p className="pb-3 text-suii-muted">{summary.totalSupportedRecords} local cached records · {summary.pendingSyncChanges} pending sync changes · {summary.legacyRecordsAwaitingImport} legacy records awaiting import</p> : null}
           <Action icon={<Database />} label="Export My Data" onClick={exportData} />
-          <Action icon={<RefreshCcw />} label="Retry Failed Changes" muted />
           <Action icon={<Database />} label="Review Device Data" onClick={() => { refreshDeviceData(); setReviewing(true); }} />
           <button className="flex min-h-14 w-full items-center gap-3 py-3 text-left display text-suii-gold" onClick={signOut}><LogOut className="size-6" />Sign Out</button>
         </section>
@@ -214,8 +233,46 @@ export function SyncDataPage() {
   );
 }
 
-function SyncRow({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
-  return <div className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 py-4 text-suii-lime">{icon}<p className="display text-xl text-white">{title}</p><p className="text-right text-suii-muted">{detail}<br /><span className="display text-suii-lime">Synced</span></p></div>;
+function buildStatusByEntity(queue: ReturnType<typeof readSyncQueue>) {
+  const status = new Map<SyncEntityType, { pending: number; failed: number }>();
+  const add = (entityType: SyncEntityType, key: "pending" | "failed") => {
+    const current = status.get(entityType) ?? { pending: 0, failed: 0 };
+    current[key] += 1;
+    status.set(entityType, current);
+  };
+  queue.pending.forEach((mutation) => add(mutation.entity_type, "pending"));
+  queue.failed.forEach((mutation) => add(mutation.entity_type, "failed"));
+  return status;
+}
+
+function categoryTotal(summary: DeviceDataSummary | null, id: DeviceCategoryId) {
+  return summary?.categories.find((item) => item.id === id)?.total ?? 0;
+}
+
+function categoryStatus(
+  summary: DeviceDataSummary | null,
+  categoryId: DeviceCategoryId,
+  entityTypes: SyncEntityType[],
+  statusByEntity: Map<SyncEntityType, { pending: number; failed: number }>
+) {
+  const totals = entityTypes.reduce((next, entityType) => {
+    const status = statusByEntity.get(entityType);
+    return {
+      pending: next.pending + (status?.pending ?? 0),
+      failed: next.failed + (status?.failed ?? 0)
+    };
+  }, { pending: 0, failed: 0 });
+  if (totals.failed > 0) return `${totals.failed} need attention`;
+  if (totals.pending > 0) return `${totals.pending} pending`;
+  const category = summary?.categories.find((item) => item.id === categoryId);
+  if (!category || category.total === 0) return "No local records";
+  if (category.rejected > 0) return `${category.rejected} need attention`;
+  if (summary?.lastSuccessfulImportAt) return "Synced";
+  return "Saved on this device";
+}
+
+function SyncRow({ icon, title, detail, status }: { icon: React.ReactNode; title: string; detail: string; status: string }) {
+  return <div className="grid grid-cols-[2rem_1fr_auto] items-center gap-3 py-4 text-suii-lime">{icon}<p className="display text-xl text-white">{title}</p><p className="text-right text-suii-muted">{detail}<br /><span className="display text-suii-lime">{status}</span></p></div>;
 }
 
 function Action({ icon, label, muted = false, onClick }: { icon: React.ReactNode; label: string; muted?: boolean; onClick?: () => void }) {

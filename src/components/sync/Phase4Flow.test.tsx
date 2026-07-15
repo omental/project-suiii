@@ -11,7 +11,7 @@ const replaceMock = vi.fn();
 const refreshMock = vi.fn();
 const pushRouteMock = vi.fn();
 const apiRequestMock = vi.fn();
-const loginMock = vi.fn(() => Promise.resolve({ user: { id: "user-1", email: "mubasshir@example.com", full_name: "J.M. Mubasshir Rahman", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" }));
+const loginMock = vi.fn(() => Promise.resolve({ user: { id: "user-1", email: "athlete@example.test", full_name: "Demo Athlete", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" }));
 
 vi.mock("next/navigation", async () => {
   const actual = await vi.importActual<typeof import("next/navigation")>("next/navigation");
@@ -29,10 +29,10 @@ vi.mock("@/lib/apiClient", () => ({
     }
   },
   NetworkError: class NetworkError extends Error {},
-  apiRequest: (...args: unknown[]) => apiRequestMock(...args),
-  fetchMe: vi.fn(() => Promise.resolve({ id: "user-1", email: "mubasshir@example.com", full_name: "J.M. Mubasshir Rahman", timezone: "Asia/Dhaka", is_active: true, is_admin: false })),
+  apiRequest: (path: unknown, options?: unknown) => apiRequestMock(path, options),
+  fetchMe: vi.fn(() => Promise.resolve({ id: "user-1", email: "athlete@example.test", full_name: "Demo Athlete", timezone: "Asia/Dhaka", is_active: true, is_admin: false })),
   fetchSyncStatus: vi.fn(() => Promise.resolve({ online: true, pending_mutations: 0, last_sync_at: "2026-07-15T10:00:00.000Z", device_name: "This device", recent_activity: [] })),
-  login: (...args: unknown[]) => loginMock(...args),
+  login: () => loginMock(),
   logout: vi.fn(),
   userFacingApiError: () => "Something went wrong. Please try again."
 }));
@@ -94,10 +94,16 @@ function seedMigrationData() {
   }));
 }
 
+function fillSignInForm() {
+  fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "athlete@example.test" } });
+  fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
+  fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+}
+
 describe("Phase 4 auth and sync screens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    loginMock.mockResolvedValue({ user: { id: "user-1", email: "mubasshir@example.com", full_name: "J.M. Mubasshir Rahman", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" });
+    loginMock.mockResolvedValue({ user: { id: "user-1", email: "athlete@example.test", full_name: "Demo Athlete", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" });
     resetSyncQueueForTests();
     resetNutritionStateForTests();
     resetTrainingStateForTests();
@@ -134,8 +140,7 @@ describe("Phase 4 auth and sync screens", () => {
     window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", date: "2026-07-15" } } }));
     render(<SignInPage />);
 
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
-    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    fillSignInForm();
 
     await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/"));
   });
@@ -144,8 +149,7 @@ describe("Phase 4 auth and sync screens", () => {
     window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 1, mealLogs: { a: { id: "a", date: "2026-07-15", mealDefinitionId: "pre-badminton", status: "completed" } } }));
     render(<SignInPage />);
 
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
-    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    fillSignInForm();
 
     await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/sync/migrate"));
   });
@@ -157,8 +161,7 @@ describe("Phase 4 auth and sync screens", () => {
     loginMock.mockResolvedValueOnce({ user: { id: "user-2", email: "other@example.com", full_name: "Other User", timezone: "Asia/Dhaka", is_active: true, is_admin: false }, csrf_token: "csrf", expires_at: "2026-07-16T00:00:00.000Z" });
     render(<SignInPage />);
 
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
-    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    fillSignInForm();
 
     await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/sync/migrate"));
   });
@@ -169,8 +172,7 @@ describe("Phase 4 auth and sync screens", () => {
     window.localStorage.setItem("project-suiii:phase-2-nutrition", JSON.stringify({ version: 2, mealLogs: { a: { id: "a", date: "2026-07-15", mealDefinitionId: "pre-badminton", status: "completed", pendingMigration: true } } }));
     render(<SignInPage />);
 
-    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
-    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    fillSignInForm();
 
     await waitFor(() => expect(pushRouteMock).toHaveBeenCalledWith("/"));
   });
@@ -178,7 +180,9 @@ describe("Phase 4 auth and sync screens", () => {
   it("renders Sync & Data status with offline queue sections", async () => {
     render(<SyncDataPage />);
     expect(await screen.findByRole("heading", { name: /sync & data/i })).toBeInTheDocument();
-    expect(screen.getByText(/Offline Ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/Local Data Available/i)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(["Full Body A", "uploaded"].join(" "), "i"))).not.toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(["automatically when", "you reconnect"].join(" "), "i"))).not.toBeInTheDocument();
     expect(screen.getAllByText(/Meals/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Sign Out/i)).toBeInTheDocument();
   });
@@ -206,7 +210,7 @@ describe("Phase 4 auth and sync screens", () => {
 
     await waitFor(() => expect(apiRequestMock).toHaveBeenCalledTimes(2));
     expect(apiRequestMock).toHaveBeenCalledWith("/sync/push", expect.any(Object));
-    expect(apiRequestMock).toHaveBeenCalledWith("/sync/pull");
+    expect(apiRequestMock).toHaveBeenCalledWith("/sync/pull", undefined);
     expect(apiRequestMock).not.toHaveBeenCalledWith("/sync/migrate", expect.any(Object));
     await waitFor(() => expect(screen.getAllByText(/Sync completed/i).length).toBeGreaterThan(0));
   });

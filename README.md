@@ -1,6 +1,6 @@
 ﻿# Project SUIII
 
-**Project SUIII** is a private, premium mobile-first fitness transformation PWA for J.M. Mubasshir Rahman.
+**Project SUIII** is a private, premium mobile-first fitness transformation PWA.
 
 Tagline: **Build Your Ultimate Form**
 
@@ -130,7 +130,7 @@ Database:
 
 Production target:
 
-- `https://suiii.muba.me`
+- Private HTTPS host configured outside the repository
 - Nginx reverse proxy
 - Let's Encrypt SSL
 
@@ -372,4 +372,4 @@ Phase 7:
 - SSL
 - Backups
 - Monitoring
-- `suiii.muba.me`
+- Private production hostname

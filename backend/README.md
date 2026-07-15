@@ -16,7 +16,7 @@ alembic upgrade head
 Create the private user:
 
 ```bash
-python -m app.scripts.create_user --email mubasshir@example.com --name "J.M. Mubasshir Rahman"
+python -m app.scripts.create_user --email athlete@example.test --name "Demo Athlete"
 ```
 
 ## Run

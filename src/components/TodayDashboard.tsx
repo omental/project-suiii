@@ -8,6 +8,7 @@ import { NextActionCard } from "@/components/NextActionCard";
 import { Timeline } from "@/components/Timeline";
 import { TransformationCard } from "@/components/TransformationCard";
 import { WorkoutPreviewCard } from "@/components/WorkoutPreviewCard";
+import { useAuthenticatedUser } from "@/components/auth/AuthenticatedUserProvider";
 import { dashboardData } from "@/data/dashboard";
 import { getPlanDay } from "@/data/nutrition";
 import { equipmentLabels, getExerciseDefinition, getWorkoutForDate } from "@/data/training";
@@ -20,6 +21,7 @@ import { useTrainingRepository } from "@/hooks/useTrainingRepository";
 import type { ProgressLocalState } from "@/types/progress";
 
 export function TodayDashboard() {
+  const authUser = useAuthenticatedUser();
   const {
     state,
     repository,
@@ -31,6 +33,17 @@ export function TodayDashboard() {
   const training = useTrainingRepository();
   const clock = useDhakaClock();
   const [progressState, setProgressState] = useState<ProgressLocalState>(defaultProgressState);
+  const displayName = authUser.full_name.trim() || authUser.email || "Athlete";
+  const shortName = displayName.split(/\s+/)[0] || "Athlete";
+  const authenticatedDashboard = {
+    ...dashboardData,
+    user: {
+      ...dashboardData.user,
+      name: displayName,
+      shortName,
+      avatarInitial: shortName.charAt(0).toUpperCase()
+    }
+  };
   useEffect(() => {
     const timeoutId = window.setTimeout(() => setProgressState(readProgressState()), 0);
     return () => window.clearTimeout(timeoutId);
@@ -38,7 +51,7 @@ export function TodayDashboard() {
   if (!clock.hydrated) {
     return (
       <AppShell>
-        <AppHeader dashboard={dashboardData} displayDate="" greeting="" streakDays={0} />
+        <AppHeader dashboard={authenticatedDashboard} displayDate="" greeting="" streakDays={0} />
       </AppShell>
     );
   }
@@ -55,11 +68,11 @@ export function TodayDashboard() {
   const nextAction = selectNextDashboardAction(todayDate, dhakaMinuteOfDay, state, training.state);
   const programme = buildProgrammeSnapshot(todayDate, state, training.state, progressState);
   const dashboard = {
-    ...dashboardData,
+    ...authenticatedDashboard,
     dateISO: todayDate,
     streakDays: programme.activeStreak,
     transformation: {
-      ...dashboardData.transformation,
+      ...authenticatedDashboard.transformation,
       week: programme.week,
       day: programme.day,
       progressPercent: programme.progressPercent

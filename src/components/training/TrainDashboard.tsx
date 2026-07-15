@@ -185,7 +185,7 @@ export function TrainDashboard() {
               </Link>
             ) : (
               <button type="button" onClick={() => handleStart()} className="focus-ring mt-4 w-full rounded-lg bg-suii-lime px-4 py-4 text-center font-black uppercase text-black">
-                Start Today's Workout
+                Start Today&apos;s Workout
               </button>
             )}
           </section>
