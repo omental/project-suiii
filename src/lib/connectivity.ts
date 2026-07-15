@@ -1,16 +1,22 @@
 import { ApiError, apiRequest, fetchMe, fetchSyncStatus, NetworkError } from "@/lib/apiClient";
 import { mergePulledRecords } from "@/lib/syncMerge";
 import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
+import { repairMissingOutboxMutations } from "@/lib/syncOutbox";
 import type { SyncPullResponse, SyncPushResponse } from "@/types/sync";
 
 export type ConnectivityKind = "online" | "offline" | "reconnecting" | "server_unreachable" | "sync_pending" | "sync_failed" | "connection_unknown";
 
 export type SyncRunResult = {
-  status: "skipped" | "complete" | "attention" | "offline" | "session_expired" | "device_revoked" | "server_unavailable";
+  status: "skipped" | "complete" | "attention" | "offline" | "session_expired" | "device_revoked" | "server_unavailable" | "storage_uninitialized";
   uploaded: number;
   downloaded: number;
   conflicts: number;
   rejected: number;
+  repaired: number;
+  unsupported: number;
+  stillPending: number;
+  pushFailed: boolean;
+  pullFailed: boolean;
 };
 
 export function classifyConnectivity(browserOnline: boolean, serverReachable: boolean | null, pending: number, failed: number): ConnectivityKind {
@@ -46,9 +52,24 @@ export function resetReconnectSyncMetaForTests() {
 }
 
 export async function runTwoWaySync(mode: "manual" | "auto" = "manual"): Promise<SyncRunResult> {
-  if (syncInFlight) return { status: "skipped", uploaded: 0, downloaded: 0, conflicts: 0, rejected: 0 };
-  const currentQueue = readSyncQueue();
-  if (mode === "auto" && currentQueue.pending.length === 0) return { status: "skipped", uploaded: 0, downloaded: 0, conflicts: 0, rejected: 0 };
+  const emptyResult = (status: SyncRunResult["status"], extras: Partial<SyncRunResult> = {}): SyncRunResult => ({
+    status,
+    uploaded: 0,
+    downloaded: 0,
+    conflicts: 0,
+    rejected: 0,
+    repaired: 0,
+    unsupported: 0,
+    stillPending: 0,
+    pushFailed: false,
+    pullFailed: false,
+    ...extras
+  });
+  if (syncInFlight) return emptyResult("skipped");
+  const repair = repairMissingOutboxMutations();
+  if (!repair.accountInitialized) return emptyResult("storage_uninitialized");
+  const currentQueue = repair.queue;
+  if (mode === "auto" && currentQueue.pending.length === 0) return emptyResult("skipped", { repaired: repair.repaired, unsupported: repair.unsupported });
   syncInFlight = true;
   try {
     await fetchMe();
@@ -67,8 +88,28 @@ export async function runTwoWaySync(mode: "manual" | "auto" = "manual"): Promise
       nextPending = currentQueue.pending.filter((mutation, index) => !push.results[index] || !confirmed(push.results[index].status));
       const failedIds = new Set(nextFailed.map((mutation) => mutation.client_mutation_id));
       nextFailed = [...nextFailed, ...nextPending.filter((mutation) => !failedIds.has(mutation.client_mutation_id))];
+      writeSyncQueue({
+        ...currentQueue,
+        pending: nextPending,
+        failed: nextFailed,
+        recentActivity: [`Push accepted: ${uploaded} uploaded, ${conflicts} conflicts, ${rejected} rejected`, ...currentQueue.recentActivity].slice(0, 5)
+      });
     }
-    const pull = await apiRequest<SyncPullResponse>("/sync/pull");
+    let pull: SyncPullResponse;
+    try {
+      pull = await apiRequest<SyncPullResponse>("/sync/pull");
+    } catch (error) {
+      const stillPending = nextPending.length;
+      return emptyResult("server_unavailable", {
+        uploaded,
+        conflicts,
+        rejected,
+        repaired: repair.repaired,
+        unsupported: repair.unsupported,
+        stillPending,
+        pullFailed: true
+      });
+    }
     downloaded = mergePulledRecords(pull.records, [...nextPending, ...nextFailed]).downloaded;
     const status = await fetchSyncStatus();
     const nextQueue = {
@@ -76,15 +117,29 @@ export async function runTwoWaySync(mode: "manual" | "auto" = "manual"): Promise
       pending: nextPending,
       failed: nextFailed,
       lastSyncAt: status.last_sync_at ?? new Date().toISOString(),
-      recentActivity: [`${mode === "auto" ? "Reconnect sync" : "Sync"} completed: ${uploaded} uploaded, ${downloaded} downloaded, ${conflicts} conflicts, ${rejected} rejected`, ...currentQueue.recentActivity].slice(0, 5)
+      recentActivity: [`${mode === "auto" ? "Reconnect sync" : "Sync"} completed: ${uploaded} uploaded, ${downloaded} downloaded, ${conflicts} conflicts, ${rejected} rejected, ${repair.repaired} repaired`, ...currentQueue.recentActivity].slice(0, 5)
     };
     writeSyncQueue(nextQueue);
-    return { status: nextPending.length || conflicts || rejected ? "attention" : "complete", uploaded, downloaded, conflicts, rejected };
+    const stillPending = nextPending.length;
+    return {
+      status: stillPending || conflicts || rejected || repair.unsupported ? "attention" : "complete",
+      uploaded,
+      downloaded,
+      conflicts,
+      rejected,
+      repaired: repair.repaired,
+      unsupported: repair.unsupported,
+      stillPending,
+      pushFailed: false,
+      pullFailed: false
+    };
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) return { status: "session_expired", uploaded: 0, downloaded: 0, conflicts: 0, rejected: 0 };
-    if (error instanceof ApiError && error.status === 403) return { status: "device_revoked", uploaded: 0, downloaded: 0, conflicts: 0, rejected: 0 };
-    if (error instanceof NetworkError) return { status: "offline", uploaded: 0, downloaded: 0, conflicts: 0, rejected: 0 };
-    return { status: "server_unavailable", uploaded: 0, downloaded: 0, conflicts: 0, rejected: 0 };
+    const latest = readSyncQueue();
+    const base = { repaired: repair.repaired, unsupported: repair.unsupported, stillPending: latest.pending.length, pushFailed: currentQueue.pending.length > 0, pullFailed: false };
+    if (error instanceof ApiError && error.status === 401) return emptyResult("session_expired", base);
+    if (error instanceof ApiError && error.status === 403) return emptyResult("device_revoked", base);
+    if (error instanceof NetworkError) return emptyResult("offline", base);
+    return emptyResult("server_unavailable", base);
   } finally {
     syncInFlight = false;
   }

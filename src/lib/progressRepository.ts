@@ -1,7 +1,7 @@
-import { enqueueMutation, readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
 import { storageKeyFor } from "@/lib/accountStorage";
 import { getProgrammeStartDate } from "@/lib/dashboardSelectors";
 import { getDhakaDateKey, getProgrammePosition } from "@/lib/dhakaClock";
+import { queueBodyMeasurementMutation, queueWeeklyCheckInMutation } from "@/lib/syncOutbox";
 import type { BodyMeasurement, DigestionLevel, ProgressLocalState, ProgressPose, WeeklyCheckIn, WellbeingLevel } from "@/types/progress";
 
 const progressKey = () => storageKeyFor("progress");
@@ -43,11 +43,6 @@ export function resetProgressStateForTests() {
   if (typeof window !== "undefined") window.localStorage.removeItem(progressKey());
 }
 
-function enqueue(entityType: "body_measurement" | "weekly_check_in", entityId: string, mutationType: "upsert" | "delete", payload: Record<string, unknown>) {
-  const queue = readSyncQueue();
-  writeSyncQueue(enqueueMutation(queue, { entity_type: entityType, entity_id: entityId, mutation_type: mutationType, payload }));
-}
-
 export function saveMeasurement(state: ProgressLocalState, input: Partial<BodyMeasurement>): ProgressLocalState {
   const now = new Date().toISOString();
   const localDate = getDhakaDateKey();
@@ -66,27 +61,16 @@ export function saveMeasurement(state: ProgressLocalState, input: Partial<BodyMe
     version: (input.version ?? 0) + 1,
     deletedAt: null
   };
-  enqueue("body_measurement", measurement.id, "upsert", {
-    client_record_id: measurement.clientRecordId,
-    measured_at: measurement.measuredAt,
-    local_date: measurement.localDate,
-    weight_kg: measurement.weightKg,
-    waist_in: measurement.waistIn,
-    chest_in: measurement.chestIn,
-    arm_in: measurement.armIn,
-    thigh_in: measurement.thighIn,
-    source: measurement.source,
-    note: measurement.note,
-    version: measurement.version
-  });
+  queueBodyMeasurementMutation(measurement);
   return { ...state, measurements: { ...state.measurements, [measurement.id]: measurement } };
 }
 
 export function deleteMeasurementLocal(state: ProgressLocalState, measurementId: string) {
   const measurement = state.measurements[measurementId];
   if (!measurement) return state;
-  enqueue("body_measurement", measurementId, "delete", { client_record_id: measurement.clientRecordId, version: measurement.version });
-  return { ...state, measurements: { ...state.measurements, [measurementId]: { ...measurement, deletedAt: new Date().toISOString(), version: measurement.version + 1 } } };
+  const deleted = { ...measurement, deletedAt: new Date().toISOString(), version: measurement.version + 1 };
+  queueBodyMeasurementMutation(deleted, "delete");
+  return { ...state, measurements: { ...state.measurements, [measurementId]: deleted } };
 }
 
 export function startOrUpdateDraftCheckIn(
@@ -137,19 +121,7 @@ export function startOrUpdateDraftCheckIn(
     version: (existing?.version ?? 0) + 1,
     deletedAt: null
   };
-  enqueue("weekly_check_in", checkIn.id, "upsert", {
-    client_record_id: checkIn.clientRecordId,
-    week_number: checkIn.weekNumber,
-    check_in_date: checkIn.checkInDate,
-    status: checkIn.status,
-    energy: checkIn.energy,
-    hunger: checkIn.hunger,
-    digestion: checkIn.digestion,
-    average_sleep_minutes: checkIn.averageSleepMinutes,
-    private_note: checkIn.privateNote,
-    measurement_id: null,
-    version: checkIn.version
-  });
+  queueWeeklyCheckInMutation(checkIn);
   return { ...measurementState, checkIns: { ...measurementState.checkIns, [checkIn.id]: checkIn }, currentDraftCheckInId: checkIn.id };
 }
 
@@ -157,20 +129,7 @@ export function completeDraftCheckIn(state: ProgressLocalState, checkInId: strin
   const checkIn = state.checkIns[checkInId];
   if (!checkIn) return state;
   const completed = { ...checkIn, status: "completed" as const, completedAt: new Date().toISOString(), version: checkIn.version + 1 };
-  enqueue("weekly_check_in", completed.id, "upsert", {
-    client_record_id: completed.clientRecordId,
-    week_number: completed.weekNumber,
-    check_in_date: completed.checkInDate,
-    status: completed.status,
-    energy: completed.energy,
-    hunger: completed.hunger,
-    digestion: completed.digestion,
-    average_sleep_minutes: completed.averageSleepMinutes,
-    private_note: completed.privateNote,
-    measurement_id: null,
-    completed_at: completed.completedAt,
-    version: completed.version
-  });
+  queueWeeklyCheckInMutation(completed);
   return { ...state, checkIns: { ...state.checkIns, [completed.id]: completed }, currentDraftCheckInId: null };
 }
 

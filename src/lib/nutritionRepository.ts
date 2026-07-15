@@ -12,6 +12,7 @@ import {
   summarizeDay
 } from "@/lib/nutritionCalc";
 import { storageKeyFor } from "@/lib/accountStorage";
+import { queueMealLogMutation } from "@/lib/syncOutbox";
 import type {
   IngredientLog,
   MealLog,
@@ -154,6 +155,7 @@ export function startWeighingSession(state: Phase2LocalState, date: string, meal
     completedAt: existingLog?.completedAt ?? null,
     updatedAt: nowISO()
   };
+  queueMealLogMutation(inProgressLog);
   return {
     ...state,
     mealLogs: { ...state.mealLogs, [id]: inProgressLog },
@@ -178,20 +180,22 @@ export function saveWeighingSession(
     ingredientLogs,
     updatedAt: nowISO()
   };
+  const inProgressLog: MealLog = {
+    id,
+    date,
+    mealDefinitionId: mealId,
+    status: "in_progress",
+    ingredientLogs,
+    startedAt: existingLog?.startedAt ?? nowISO(),
+    completedAt: null,
+    updatedAt: nowISO()
+  };
+  queueMealLogMutation(inProgressLog);
   return {
     ...state,
     mealLogs: {
       ...state.mealLogs,
-      [id]: {
-        id,
-        date,
-        mealDefinitionId: mealId,
-        status: "in_progress",
-        ingredientLogs,
-        startedAt: existingLog?.startedAt ?? nowISO(),
-        completedAt: null,
-        updatedAt: nowISO()
-      }
+      [id]: inProgressLog
     },
     weighingSessions: { ...state.weighingSessions, [id]: session }
   };
@@ -202,20 +206,22 @@ export function completeMeal(state: Phase2LocalState, date: string, mealId: stri
   const existingLog = state.mealLogs[id];
   const nextSessions = { ...state.weighingSessions };
   delete nextSessions[id];
+  const completedLog: MealLog = {
+    id,
+    date,
+    mealDefinitionId: mealId,
+    status: "completed",
+    ingredientLogs,
+    startedAt: existingLog?.startedAt ?? nowISO(),
+    completedAt: nowISO(),
+    updatedAt: nowISO()
+  };
+  queueMealLogMutation(completedLog);
   return {
     ...state,
     mealLogs: {
       ...state.mealLogs,
-      [id]: {
-        id,
-        date,
-        mealDefinitionId: mealId,
-        status: "completed",
-        ingredientLogs,
-        startedAt: existingLog?.startedAt ?? nowISO(),
-        completedAt: nowISO(),
-        updatedAt: nowISO()
-      }
+      [id]: completedLog
     },
     weighingSessions: nextSessions
   };
@@ -225,20 +231,22 @@ export function skipMeal(state: Phase2LocalState, date: string, mealId: string):
   const meal = requireMeal(date, mealId);
   const id = mealLogId(date, mealId);
   const ingredientLogs = createInitialLogs(meal).map((log) => ({ ...log, skipped: true }));
+  const skippedLog: MealLog = {
+    id,
+    date,
+    mealDefinitionId: mealId,
+    status: "skipped",
+    ingredientLogs,
+    startedAt: null,
+    completedAt: null,
+    updatedAt: nowISO()
+  };
+  queueMealLogMutation(skippedLog);
   return {
     ...state,
     mealLogs: {
       ...state.mealLogs,
-      [id]: {
-        id,
-        date,
-        mealDefinitionId: mealId,
-        status: "skipped",
-        ingredientLogs,
-        startedAt: null,
-        completedAt: null,
-        updatedAt: nowISO()
-      }
+      [id]: skippedLog
     }
   };
 }
@@ -267,20 +275,22 @@ export function applySubstitution(
         }
       : log
   );
+  const nextLog: MealLog = {
+    id,
+    date,
+    mealDefinitionId: mealId,
+    status: existing?.status ?? "scheduled",
+    ingredientLogs,
+    startedAt: existing?.startedAt ?? null,
+    completedAt: existing?.completedAt ?? null,
+    updatedAt: nowISO()
+  };
+  queueMealLogMutation(nextLog);
   return {
     ...state,
     mealLogs: {
       ...state.mealLogs,
-      [id]: {
-        id,
-        date,
-        mealDefinitionId: mealId,
-        status: existing?.status ?? "scheduled",
-        ingredientLogs,
-        startedAt: existing?.startedAt ?? null,
-        completedAt: existing?.completedAt ?? null,
-        updatedAt: nowISO()
-      }
+      [id]: nextLog
     }
   };
 }

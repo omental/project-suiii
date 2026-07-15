@@ -93,6 +93,25 @@ class FakeSession:
             return self.check_ins.get((user_id, params.get("client_record_id_1")))
         return None
 
+    async def scalars(self, statement: Any) -> Any:
+        self.query_count += 1
+        entity = statement.column_descriptions[0]["entity"]
+        params = statement.compile().params
+        user_id = params.get("user_id_1")
+        if entity is MealLog:
+            records = [record for (owner, _), record in self.meals.items() if owner == user_id]
+        elif entity is WorkoutSession:
+            records = [record for (owner, _), record in self.workouts.items() if owner == user_id]
+        elif entity is DailyTracking:
+            records = [record for (owner, _), record in self.daily.items() if owner == user_id]
+        elif entity is BodyMeasurement:
+            records = [record for (owner, _), record in self.measurements.items() if owner == user_id]
+        elif entity is WeeklyCheckIn:
+            records = [record for (owner, _), record in self.check_ins.items() if owner == user_id]
+        else:
+            records = []
+        return SimpleNamespace(all=lambda: records)
+
     async def flush(self) -> None:
         if self.fail_flush:
             raise SQLAlchemyError("INSERT INTO meal_logs failed with params")
@@ -365,6 +384,67 @@ async def test_migrate_exact_production_meal_payload_and_retry_is_idempotent() -
     assert meal.started_at == datetime(2026, 7, 15, 6, 8, 30, 92000, tzinfo=UTC)
     assert meal.completed_at == datetime(2026, 7, 15, 6, 8, 32, 205000, tzinfo=UTC)
     assert meal.payload["startedAt"] == "2026-07-15T06:08:30.092Z"
+
+
+@pytest.mark.asyncio
+async def test_sync_pull_uses_authenticated_user_not_origin_device() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="computer-meal"))
+    await service.apply_mutation(USER_ID, workout_mutation(mutation_id="phone-workout"))
+    response = await service.pull_server_state(USER_ID)
+
+    pulled = {(record.entity_type, record.client_record_id) for record in response.records}
+    assert ("meal_log", "2026-07-15:pre-badminton") in pulled
+    assert ("workout_session", "session-1") in pulled
+    assert len(response.records) == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_records_are_isolated_by_authenticated_user_id() -> None:
+    other_user = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="user-a-meal"))
+    await service.apply_mutation(other_user, meal_mutation({"status": "skipped"}, mutation_id="user-b-meal"))
+
+    user_a = await service.pull_server_state(USER_ID)
+    user_b = await service.pull_server_state(other_user)
+
+    assert len(user_a.records) == 1
+    assert len(user_b.records) == 1
+    assert user_a.records[0].payload["status"] == "completed"
+    assert user_b.records[0].payload["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_mutation_id_is_idempotent_per_user() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+    mutation = meal_mutation(mutation_id="retry-meal")
+
+    first = await service.apply_mutation(USER_ID, mutation)
+    duplicate = await service.apply_mutation(USER_ID, mutation)
+
+    assert first.status == "applied"
+    assert duplicate.status == "duplicate"
+    assert session.meals[(USER_ID, "2026-07-15:pre-badminton")].status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_reused_mutation_id_with_different_payload_is_rejected() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="retry-meal"))
+
+    with pytest.raises(HTTPException) as raised:
+        await service.apply_mutation(USER_ID, meal_mutation({"status": "skipped"}, mutation_id="retry-meal"))
+
+    assert raised.value.status_code == 409
+    assert session.meals[(USER_ID, "2026-07-15:pre-badminton")].status == "completed"
 
 
 @pytest.mark.asyncio

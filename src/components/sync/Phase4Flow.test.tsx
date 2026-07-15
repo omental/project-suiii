@@ -94,6 +94,11 @@ function seedMigrationData() {
   }));
 }
 
+function seedScopedQueue(queue: Record<string, unknown>) {
+  window.localStorage.setItem("project-suiii:offline-account-marker", JSON.stringify({ accountId: "user-1", deviceId: "device-local", enabled: true }));
+  window.localStorage.setItem("project-suiii:user-1:device-local:syncQueue:v4", JSON.stringify(queue));
+}
+
 function fillSignInForm() {
   fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "athlete@example.test" } });
   fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "password" } });
@@ -188,7 +193,7 @@ describe("Phase 4 auth and sync screens", () => {
   });
 
   it("sync now calls normal push workflow once and never calls migration", async () => {
-    window.localStorage.setItem("project-suiii:phase-4-sync-queue", JSON.stringify({
+    seedScopedQueue({
       version: 4,
       deviceId: "device-local",
       deviceName: "This device",
@@ -197,7 +202,7 @@ describe("Phase 4 auth and sync screens", () => {
       failed: [],
       lastSyncAt: null,
       recentActivity: []
-    }));
+    });
     apiRequestMock.mockResolvedValueOnce({
       results: [{ mutation_id: "server-mut-1", entity_type: "meal_log", entity_id: "meal-1", status: "applied", server_version: 3, payload: {} }],
       server_time: "2026-07-15T10:00:00.000Z"
@@ -216,7 +221,7 @@ describe("Phase 4 auth and sync screens", () => {
   });
 
   it("does not report success when pull fails after push", async () => {
-    window.localStorage.setItem("project-suiii:phase-4-sync-queue", JSON.stringify({
+    seedScopedQueue({
       version: 4,
       deviceId: "device-local",
       deviceName: "This device",
@@ -225,7 +230,7 @@ describe("Phase 4 auth and sync screens", () => {
       failed: [],
       lastSyncAt: null,
       recentActivity: []
-    }));
+    });
     apiRequestMock.mockResolvedValueOnce({
       results: [{ mutation_id: "server-mut-1", entity_type: "meal_log", entity_id: "meal-1", status: "applied", server_version: 3, payload: {} }],
       server_time: "2026-07-15T10:00:00.000Z"
@@ -234,9 +239,10 @@ describe("Phase 4 auth and sync screens", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /sync now/i }));
 
-    await waitFor(() => expect(screen.getByText(/Server unavailable/i)).toBeInTheDocument());
-    expect(window.localStorage.getItem("project-suiii:phase-4-sync-queue")).toContain("mut-1");
-    expect(window.localStorage.getItem("project-suiii:phase-4-sync-queue")).not.toContain("lastSyncAt\":\"2026");
+    await waitFor(() => expect(screen.getByText(/Push accepted, but pull failed/i)).toBeInTheDocument());
+    const scopedQueue = window.localStorage.getItem("project-suiii:user-1:device-local:syncQueue:v4");
+    expect(scopedQueue).not.toContain("mut-1");
+    expect(scopedQueue).not.toContain("lastSyncAt\":\"2026");
   });
 
   it("reviews device data summaries and expands readable records without auth secrets", async () => {

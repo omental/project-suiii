@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.playwright.json",
     "test": "vitest run",
     "test:integration": "vitest run src/lib/pwaSprint4.test.ts src/lib/trainingSprint3Audit.test.ts",
     "test:e2e": "npm run build && playwright test",

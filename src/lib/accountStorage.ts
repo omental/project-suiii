@@ -21,6 +21,11 @@ type AccountMarker = {
   enabled: boolean;
 };
 
+export type ActiveAccountIdentity = {
+  accountId: string;
+  deviceId: string;
+};
+
 function safeSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 96);
 }
@@ -38,6 +43,17 @@ export function readActiveAccountMarker(): AccountMarker | null {
   } catch {
     return null;
   }
+}
+
+export function getCanonicalAccountIdentity(): ActiveAccountIdentity | null {
+  const marker = readActiveAccountMarker();
+  return marker ? { accountId: marker.accountId, deviceId: marker.deviceId } : null;
+}
+
+export function requireCanonicalAccountIdentity(): ActiveAccountIdentity {
+  const identity = getCanonicalAccountIdentity();
+  if (!identity) throw new Error("Account storage is not initialized for the authenticated user.");
+  return identity;
 }
 
 export function storageKeyFor(domain: StorageDomain) {

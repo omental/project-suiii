@@ -159,9 +159,20 @@ Open the app at `http://localhost:3000`.
 ```bash
 npm run lint
 npm run typecheck
+npm run typecheck:e2e
 npm run test
+npm run test:integration
 npm run build
+npm run test:e2e
 ```
+
+## Production Build Workflow
+
+The Next.js application TypeScript project is intentionally limited to application source, Next generated types and app configuration. Playwright configuration, E2E specs, browser mock fixtures, reports and test results are excluded from the main `tsconfig.json` and covered by `tsconfig.playwright.json` plus `npm run typecheck:e2e`.
+
+Production builds may install dev dependencies during the build phase if the host requires them for compilation, but the running application must not depend on Playwright. Keep `@playwright/test` in `devDependencies`; do not move it to production dependencies. Playwright browsers, `playwright-report/` and `test-results/` are test artifacts and must not be deployed or committed.
+
+Use `npm run build` for the production app build. Use `npm run test:e2e` only in CI/development environments with dev dependencies and Playwright browsers available.
 
 Backend:
 

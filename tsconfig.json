@@ -30,12 +30,23 @@
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "next.config.mjs",
+    "eslint.config.mjs",
+    "postcss.config.mjs",
+    "tailwind.config.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "playwright.config.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "tests/e2e/**",
+    "tests/fixtures/**",
+    "playwright-report/**",
+    "test-results/**"
   ]
 }

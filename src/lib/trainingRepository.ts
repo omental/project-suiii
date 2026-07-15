@@ -1,6 +1,6 @@
 import { getExerciseDefinition, getExerciseSubstitutions, getWorkoutDefinition, getWorkoutForDate, weeklyTrainingSchedule } from "@/data/training";
 import { storageKeyFor } from "@/lib/accountStorage";
-import { enqueueMutation, readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
+import { queueDailyTrackingMutation, queueWorkoutSessionMutation } from "@/lib/syncOutbox";
 import {
   addRestSeconds,
   clampNumber,
@@ -135,6 +135,7 @@ export function createWorkoutSession(state: Phase3TrainingState, date: string, w
     restTimer: null,
     feedback: null
   };
+  if (readiness) queueDailyTrackingMutation(readiness);
   return {
     ...state,
     sessions: { ...state.sessions, [id]: session },
@@ -316,32 +317,6 @@ export function completeSession(state: Phase3TrainingState, sessionId: string, f
   };
   queueWorkoutSessionMutation(nextSession);
   return { ...updateSession(state, nextSession), activeSessionId: state.activeSessionId === sessionId ? null : state.activeSessionId };
-}
-
-function queueWorkoutSessionMutation(session: WorkoutSession) {
-  if (typeof window === "undefined") return;
-  try {
-    const queue = readSyncQueue();
-    const next = enqueueMutation(queue, {
-      entity_type: "workout_session",
-      entity_id: session.id,
-      mutation_type: "upsert",
-      payload: {
-        client_record_id: session.id,
-        date: session.date,
-        workoutDefinitionId: session.workoutDefinitionId,
-        status: session.status,
-        startedAt: session.startedAt,
-        completedAt: session.completedAt,
-        updatedAt: session.updatedAt,
-        version: 3,
-        payload: session
-      }
-    });
-    writeSyncQueue(next);
-  } catch {
-    // The visible session remains in local training state; Sync & Data reports storage health.
-  }
 }
 
 export function updateProgressionRecommendation(state: Phase3TrainingState, recommendationId: string, status: "accepted" | "declined" | "review_later") {

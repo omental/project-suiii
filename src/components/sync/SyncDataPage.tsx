@@ -12,6 +12,7 @@ import { downloadDeviceDataBackup, getDeviceDataSummary, type DeviceCategoryId, 
 import { buildMigrationPreview } from "@/lib/localMigration";
 import { disableOfflineAccountAccess } from "@/lib/offlineAccount";
 import { readSyncQueue } from "@/lib/syncQueue";
+import { getCanonicalAccountIdentity, storageKeyFor } from "@/lib/accountStorage";
 import type { MigrationPreview, SyncEntityType } from "@/types/sync";
 
 export function SyncDataPage() {
@@ -61,7 +62,6 @@ export function SyncDataPage() {
 
   const syncNow = async () => {
     if (inFlightSyncRef.current) return;
-    const currentQueue = readSyncQueue();
     inFlightSyncRef.current = true;
     setSyncState("syncing");
     setSyncMessage("Syncing...");
@@ -72,22 +72,31 @@ export function SyncDataPage() {
       setSummary(getDeviceDataSummary());
       if (result.status === "complete") {
         setSyncState("complete");
-        setSyncMessage(result.uploaded > 0 ? `Sync completed: ${result.uploaded} uploaded, ${result.downloaded} downloaded` : "All caught up");
+        const repaired = result.repaired ? `, ${result.repaired} repaired` : "";
+        setSyncMessage(result.uploaded > 0 || result.downloaded > 0 || result.repaired > 0 ? `Sync completed: ${result.uploaded} uploaded, ${result.downloaded} downloaded${repaired}` : "All caught up");
       } else if (result.status === "attention") {
         setSyncState("attention");
-        setSyncMessage(`Sync needs attention: ${result.conflicts} conflicts, ${result.rejected} rejected`);
+        const repaired = result.repaired ? `${result.repaired} repaired, ` : "";
+        const unsupported = result.unsupported ? `, ${result.unsupported} unsupported local photo uploads` : "";
+        setSyncMessage(`Sync needs attention: ${repaired}${result.stillPending} still pending, ${result.conflicts} conflicts, ${result.rejected} rejected${unsupported}`);
       } else if (result.status === "offline") {
         setSyncState("offline");
-        setSyncMessage("Offline - changes retained");
+        setSyncMessage(`Offline - ${result.stillPending} changes retained`);
       } else if (result.status === "session_expired") {
         setSyncState("attention");
         setSyncMessage("Session expired");
       } else if (result.status === "device_revoked") {
         setSyncState("attention");
         setSyncMessage("Device revoked");
+      } else if (result.status === "storage_uninitialized") {
+        setSyncState("attention");
+        setSyncMessage("Account storage is not initialized. Sign in again before syncing.");
+      } else if (result.pullFailed) {
+        setSyncState("server_unavailable");
+        setSyncMessage(`Push accepted, but pull failed: ${result.uploaded} uploaded, ${result.stillPending} still pending`);
       } else {
         setSyncState("server_unavailable");
-        setSyncMessage("Server unavailable");
+        setSyncMessage(`Server unavailable - ${result.stillPending} changes retained`);
       }
     } catch {
       setSyncState("server_unavailable");
@@ -161,6 +170,7 @@ export function SyncDataPage() {
           <h2 className="display text-2xl">Recent Activity</h2>
           {queue.recentActivity.length ? queue.recentActivity.map((item) => <p key={item} className="mt-3 text-suii-muted">✓ {item}</p>) : <p className="mt-3 text-suii-muted">No sync activity yet.</p>}
         </section>
+        {process.env.NODE_ENV !== "production" ? <SyncDiagnosticsPanel userId={authUser.id} queue={queue} /> : null}
         <section className="card mt-4 divide-y divide-white/10 p-4">
           <h2 className="display pb-3 text-2xl">Device Data</h2>
           {summary ? <p className="pb-3 text-suii-muted">{summary.totalSupportedRecords} local cached records · {summary.pendingSyncChanges} pending sync changes · {summary.legacyRecordsAwaitingImport} legacy records awaiting import</p> : null}
@@ -205,6 +215,26 @@ export function SyncDataPage() {
         <p className="card mt-4 flex gap-3 p-4 text-suii-muted"><Shield className="size-6 text-suii-gold" />Your fitness records are available only to your authenticated account.</p>
       </div>
     </AppShell>
+  );
+}
+
+function SyncDiagnosticsPanel({ userId, queue }: { userId: string; queue: ReturnType<typeof readSyncQueue> }) {
+  const identity = getCanonicalAccountIdentity();
+  const entityCounts = buildStatusByEntity(queue);
+  return (
+    <section className="card mt-4 p-4" data-testid="sync-diagnostics">
+      <p className="display text-suii-gold">Sync Diagnostics</p>
+      <div className="mt-3 grid gap-2 text-xs text-suii-muted">
+        <p>Server user ID: {userId}</p>
+        <p>Local account ID: {identity?.accountId ?? "not initialized"}</p>
+        <p>Device ID: {queue.deviceId}</p>
+        <p>Namespace: {identity ? storageKeyFor("syncQueue") : "legacy/offline"}</p>
+        <p>Pending: {queue.pending.length} · Failed: {queue.failed.length} · Last sync: {queue.lastSyncAt ?? "not yet"}</p>
+        {[...entityCounts.entries()].map(([entityType, counts]) => (
+          <p key={entityType}>{entityType}: {counts.pending} pending · {counts.failed} failed</p>
+        ))}
+      </div>
+    </section>
   );
 }
 

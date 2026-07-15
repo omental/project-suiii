@@ -56,6 +56,39 @@ export function enqueueMutation(state: SyncQueueState, mutation: Omit<SyncMutati
   };
 }
 
+export function upsertPendingMutation(
+  state: SyncQueueState,
+  mutation: Omit<SyncMutation, "client_mutation_id" | "device_id" | "created_at">
+): SyncQueueState {
+  const existingIndex = state.pending.findIndex((item) =>
+    item.entity_type === mutation.entity_type &&
+    item.entity_id === mutation.entity_id &&
+    item.mutation_type === mutation.mutation_type
+  );
+  const createdAt = new Date().toISOString();
+  if (existingIndex >= 0) {
+    const pending = [...state.pending];
+    pending[existingIndex] = {
+      ...pending[existingIndex],
+      ...mutation,
+      device_id: state.deviceId
+    };
+    return { ...state, pending };
+  }
+  return {
+    ...state,
+    pending: [
+      ...state.pending,
+      {
+        ...mutation,
+        client_mutation_id: randomId(),
+        device_id: state.deviceId,
+        created_at: createdAt
+      }
+    ]
+  };
+}
+
 export function resetSyncQueueForTests() {
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(queueKey());
