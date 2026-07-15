@@ -165,21 +165,29 @@ export function TrainDashboard() {
         {workout ? (
           <section className="card mt-3 p-4">
             <h2 className="display text-2xl text-white">Workout Preview</h2>
-            <div className="mt-3 grid gap-2">
-              {workout.exercises.slice(0, 4).map((prescription) => {
+            <div className="mt-3 divide-y divide-white/10">
+              {workout.exercises.map((prescription) => {
                 const exercise = getExerciseDefinition(prescription.exerciseId);
                 return (
-                  <div key={prescription.id} className="flex items-center justify-between border-b border-white/10 py-2 last:border-b-0">
-                    <div>
+                  <div key={prescription.id} className="flex items-center justify-between gap-3 py-2.5">
+                    <div className="min-w-0">
                       <p className="font-bold text-white">{exercise.name}</p>
-                      <p className="text-xs text-suii-muted">{prescription.week1Sets} sets · {prescription.targetReps ?? prescription.targetSeconds} · {exercise.defaultResistance.label}</p>
+                      <p className="text-xs text-suii-muted">{formatPreviewPrescription(prescription, exercise)}</p>
                     </div>
                     <Clock3 className="size-5 text-suii-muted" aria-hidden="true" />
                   </div>
                 );
               })}
-              {workout.exercises.length > 4 ? <p className="display text-center text-suii-lime">+ {workout.exercises.length - 4} more exercises</p> : null}
             </div>
+            {activeSession ? (
+              <Link href={`/train/session/${activeSession.id}`} className="focus-ring mt-4 block rounded-lg bg-suii-lime px-4 py-4 text-center font-black uppercase text-black">
+                Resume Workout
+              </Link>
+            ) : (
+              <button type="button" onClick={() => handleStart()} className="focus-ring mt-4 w-full rounded-lg bg-suii-lime px-4 py-4 text-center font-black uppercase text-black">
+                Start Today's Workout
+              </button>
+            )}
           </section>
         ) : null}
 
@@ -203,4 +211,13 @@ export function TrainDashboard() {
       </div>
     </AppShell>
   );
+}
+
+function formatPreviewPrescription(
+  prescription: ReturnType<typeof getWorkoutDefinition>["exercises"][number],
+  exercise: ReturnType<typeof getExerciseDefinition>
+) {
+  const target = prescription.targetReps ?? (prescription.targetSeconds && /^\d+$/.test(prescription.targetSeconds) ? `${prescription.targetSeconds} sec` : prescription.targetSeconds);
+  const sideInstruction = exercise.unilateral && !String(target).toLowerCase().includes("each") ? "each side" : null;
+  return [`${prescription.week1Sets} sets`, target, exercise.defaultResistance.label, sideInstruction].filter(Boolean).join(" · ");
 }

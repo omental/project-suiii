@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TodayDashboard } from "@/components/TodayDashboard";
@@ -8,6 +8,7 @@ import { TrainingHistory } from "@/components/training/TrainingHistory";
 import { WorkoutPlayer } from "@/components/training/WorkoutPlayer";
 import { createWorkoutSession, defaultPhase3TrainingState, resetTrainingStateForTests, writeTrainingState } from "@/lib/trainingRepository";
 import { resetNutritionStateForTests } from "@/lib/nutritionRepository";
+import { getExerciseDefinition, getWorkoutDefinition } from "@/data/training";
 
 const push = vi.fn();
 
@@ -40,6 +41,65 @@ describe("Phase 3 training flow", () => {
     expect(screen.getByText(/Weekly Schedule/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Readiness/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /start workout/i })).toBeInTheDocument();
+  });
+
+  it("renders every exercise in the current workout preview without a hidden-count row", async () => {
+    vi.setSystemTime(new Date("2026-07-14T23:30:00.000Z"));
+    const workout = getWorkoutDefinition("full-body-c");
+    render(<TrainDashboard />);
+
+    const preview = (await screen.findByRole("heading", { name: /workout preview/i })).closest("section")!;
+    workout.exercises.forEach((prescription) => {
+      expect(within(preview).getByText(getExerciseDefinition(prescription.exerciseId).name)).toBeInTheDocument();
+    });
+    expect(within(preview).queryByText(/\+\s*\d+\s*more exercises/i)).not.toBeInTheDocument();
+    expect(within(preview).getAllByText(/sets/i)).toHaveLength(workout.exercises.length);
+  });
+
+  it("matches Full Body C exercise order and preserves unilateral, weight, reps and sets details", async () => {
+    vi.setSystemTime(new Date("2026-07-14T23:30:00.000Z"));
+    const workout = getWorkoutDefinition("full-body-c");
+    render(<TrainDashboard />);
+
+    const preview = (await screen.findByRole("heading", { name: /workout preview/i })).closest("section")!;
+    const names = Array.from(preview.querySelectorAll(".font-bold.text-white")).map((item) => item.textContent);
+    expect(names).toEqual(workout.exercises.map((item) => getExerciseDefinition(item.exerciseId).name));
+    expect(within(preview).getByText(/2 sets · 12 each arm · 7.5 kg/i)).toBeInTheDocument();
+    expect(within(preview).getByText(/2 sets · 8-12 · 5 kg pair/i)).toBeInTheDocument();
+    expect(within(preview).getByText(/2 sets · 20-30 each side · Bodyweight/i)).toBeInTheDocument();
+  });
+
+  it("starts the guided workout for the current preview workout", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.setSystemTime(new Date("2026-07-14T23:30:00.000Z"));
+    render(<TrainDashboard />);
+
+    await user.click(await screen.findByRole("button", { name: /start today's workout/i }));
+
+    expect(push).toHaveBeenCalledWith(expect.stringMatching(/^\/train\/session\/session-2026-07-15-full-body-c-/));
+  });
+
+  it("does not render a strength preview on Friday rest day", async () => {
+    vi.setSystemTime(new Date("2026-07-16T23:30:00.000Z"));
+    render(<TrainDashboard />);
+
+    expect(await screen.findByRole("heading", { name: /complete rest/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /workout preview/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Dumbbell Sumo Squat/i)).not.toBeInTheDocument();
+  });
+
+  it("updates the preview when the Dhaka programme day changes", async () => {
+    vi.setSystemTime(new Date("2026-07-14T17:30:00.000Z"));
+    render(<TrainDashboard />);
+    expect(await screen.findAllByText(/Shoulder Care/i)).not.toHaveLength(0);
+
+    vi.setSystemTime(new Date("2026-07-14T18:01:00.000Z"));
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    await waitFor(() => expect(screen.getAllByText(/Full Body C/i).length).toBeGreaterThan(0));
+    expect(screen.getByText(/Dumbbell Sumo Squat/i)).toBeInTheDocument();
   });
 
   it("renders workout player controls and form-guide navigation", async () => {
