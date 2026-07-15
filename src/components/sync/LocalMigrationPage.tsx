@@ -2,38 +2,89 @@
 
 import { CheckCircle2, CloudUpload, Eye, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { apiRequest } from "@/lib/apiClient";
-import { buildMigrationMutations, buildMigrationPreview } from "@/lib/localMigration";
-import { readSyncQueue } from "@/lib/syncQueue";
-import type { MigrationPreview } from "@/types/sync";
+import { downloadDeviceDataBackup } from "@/lib/deviceData";
+import { buildMigrationMutations, buildMigrationPreview, completeConfirmedMigrationRecords } from "@/lib/localMigration";
+import { readSyncQueue, writeSyncQueue } from "@/lib/syncQueue";
+import type { MigrationPreview, MigrationResponse } from "@/types/sync";
 
 export function LocalMigrationPage() {
+  const router = useRouter();
   const [preview, setPreview] = useState<MigrationPreview>({ meal_logs: 0, workout_sessions: 0, daily_check_ins: 0, sets: 0, date_range: "No local records", total_records: 0 });
   const [policy, setPolicy] = useState<"keep_latest" | "keep_server" | "review_each">("keep_latest");
   const [status, setStatus] = useState("Ready to import");
   const [busy, setBusy] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [partial, setPartial] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
+  const submittingRef = useRef(false);
+  const checkedEmptyRef = useRef(false);
 
   useEffect(() => {
     // Local migration data is only available after hydration.
+    const currentPreview = buildMigrationPreview();
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setPreview(buildMigrationPreview());
+    setPreview(currentPreview);
+    if (!checkedEmptyRef.current && currentPreview.total_records === 0) {
+      checkedEmptyRef.current = true;
+      router.replace("/");
+      router.refresh();
+    }
+    // The hydration check is intentionally one-shot so rerenders cannot trigger redirects or imports.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const continueToDashboard = () => {
+    router.replace("/");
+    router.refresh();
+  };
+
+  const exportBackup = () => {
+    try {
+      const result = downloadDeviceDataBackup();
+      setExportMessage(`${result.filename} exported`);
+    } catch {
+      setExportMessage("Export failed. Local data was not changed.");
+    }
+  };
+
   const importData = async () => {
-    if (busy) return;
+    if (submittingRef.current || completed) return;
     const queue = readSyncQueue();
     const records = buildMigrationMutations(queue.deviceId);
+    const currentPreview = buildMigrationPreview();
+    setPreview(currentPreview);
+    if (records.length === 0 || currentPreview.total_records === 0) {
+      continueToDashboard();
+      return;
+    }
+    submittingRef.current = true;
     setBusy(true);
+    setPartial(false);
     try {
-      await apiRequest("/sync/migrate", {
+      const response = await apiRequest<MigrationResponse>("/sync/migrate", {
         method: "POST",
-        body: JSON.stringify({ device_id: queue.deviceId, device_name: queue.deviceName, conflict_policy: policy, preview, records })
+        body: JSON.stringify({ device_id: queue.deviceId, device_name: queue.deviceName, conflict_policy: policy, preview: currentPreview, records })
       });
-      setStatus("Import complete");
+      const nextPreview = completeConfirmedMigrationRecords(response, records);
+      setPreview(nextPreview);
+      const migrated = response.imported_records + response.skipped_records;
+      const failed = response.error_records + response.conflict_records;
+      if (failed > 0 || nextPreview.total_records > 0) {
+        setPartial(true);
+        setStatus(`${migrated} migrated · ${failed || nextPreview.total_records} need attention`);
+        return;
+      }
+      writeSyncQueue({ ...queue, lastSyncAt: new Date().toISOString(), recentActivity: ["Local import complete", ...queue.recentActivity].slice(0, 5) });
+      setCompleted(true);
+      setStatus(`Import complete · ${migrated} records migrated`);
+      continueToDashboard();
     } catch {
       setStatus("Import failed. Local data remains on this device.");
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   };
@@ -61,6 +112,7 @@ export function LocalMigrationPage() {
             <Metric value={preview.date_range} label="Dates" gold />
           </div>
           <p className="mt-4 rounded-full border border-suii-blue px-4 py-2 text-center display text-suii-blue">{status}</p>
+          {partial ? <p className="mt-3 text-sm text-suii-gold">Some records were not imported. They remain on this device for retry.</p> : null}
         </section>
         <section className="card mt-4 p-4">
           <h2 className="display text-suii-lime">What Happens</h2>
@@ -86,7 +138,11 @@ export function LocalMigrationPage() {
           <p className="mt-3 text-suii-gold">Nothing is deleted automatically.</p>
         </section>
         <p className="card mt-4 flex items-center gap-3 p-4 text-suii-muted"><ShieldCheck className="size-8 text-suii-lime" />Only your signed-in account can access this data.</p>
-        <button onClick={importData} disabled={busy} className="focus-ring mt-4 w-full rounded-lg bg-suii-lime px-4 py-4 display text-3xl text-black disabled:opacity-60">{busy ? "Importing" : `Import ${preview.total_records} Records ›`}</button>
+        <button onClick={importData} disabled={busy || completed} className="focus-ring mt-4 w-full rounded-lg bg-suii-lime px-4 py-4 display text-3xl text-black disabled:opacity-60">{busy ? "Importing" : completed ? "Imported" : `Import ${preview.total_records} Records ›`}</button>
+        {completed || partial ? <button onClick={continueToDashboard} className="focus-ring mt-3 w-full rounded-lg border border-suii-blue px-4 py-4 text-center display text-2xl text-suii-blue">Continue to dashboard</button> : null}
+        <button onClick={exportBackup} className="focus-ring mt-3 w-full rounded-lg border border-suii-gold px-4 py-4 text-center display text-2xl text-suii-gold">Export backup</button>
+        <Link href="/sync" className="focus-ring mt-3 block rounded-lg border border-suii-blue px-4 py-4 text-center display text-2xl text-suii-blue">Review device data</Link>
+        {exportMessage ? <p className="mt-3 text-center text-sm text-suii-blue">{exportMessage}</p> : null}
         <Link href="/" className="focus-ring mt-3 block rounded-lg border border-suii-lime px-4 py-4 text-center display text-2xl text-suii-lime">Start Fresh</Link>
         <p className="mt-3 flex gap-2 text-sm text-suii-muted"><Eye className="size-5 text-suii-blue" />You can review the import before final confirmation.</p>
       </div>

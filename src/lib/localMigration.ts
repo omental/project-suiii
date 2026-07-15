@@ -1,4 +1,4 @@
-import type { MigrationPreview, SyncMutation } from "@/types/sync";
+import type { MigrationPreview, MigrationResponse, SyncMutation } from "@/types/sync";
 
 const phase2Key = "project-suiii:phase-2-nutrition";
 const phase3Key = "project-suiii:phase-3-training";
@@ -79,5 +79,64 @@ export function buildMigrationMutations(deviceId: string): SyncMutation[] {
       }
     });
   });
+  const readinessByDate = training?.readinessByDate as Record<string, { date?: string; badmintonGames?: number; energy?: string; soreness?: number; sleepHours?: number | null; note?: string }> | undefined;
+  Object.entries(readinessByDate ?? {}).forEach(([date, checkIn]) => {
+    mutations.push({
+      client_mutation_id: `migrate-daily-${date}`,
+      device_id: deviceId,
+      entity_type: "daily_tracking",
+      entity_id: `daily-${date}`,
+      mutation_type: "upsert",
+      created_at: now,
+      payload: {
+        tracking_date: checkIn.date ?? date,
+        water_ml: 0,
+        cigarettes: 0,
+        badminton_games: checkIn.badmintonGames ?? null,
+        energy: checkIn.energy ?? null,
+        soreness: checkIn.soreness ?? null,
+        sleep_minutes: checkIn.sleepHours === null || checkIn.sleepHours === undefined ? null : Math.round(Number(checkIn.sleepHours) * 60),
+        notes: checkIn.note ?? null,
+        version: 1
+      }
+    });
+  });
   return mutations;
+}
+
+export function completeConfirmedMigrationRecords(response: MigrationResponse, records: SyncMutation[]) {
+  if (typeof window === "undefined") return buildMigrationPreview();
+  const rejectedIds = new Set((response.summary.rejected_items ?? []).map((item) => item.client_record_id));
+  const confirmed = records.filter((record) => {
+    const clientRecordId = typeof record.payload.client_record_id === "string" ? record.payload.client_record_id : record.entity_id.replace(/^daily-/, "");
+    return !rejectedIds.has(clientRecordId);
+  });
+
+  const mealIds = new Set(confirmed.filter((record) => record.entity_type === "meal_log").map((record) => String(record.payload.client_record_id)));
+  const workoutIds = new Set(confirmed.filter((record) => record.entity_type === "workout_session").map((record) => String(record.payload.client_record_id)));
+  const dailyDates = new Set(confirmed.filter((record) => record.entity_type === "daily_tracking").map((record) => String(record.payload.tracking_date ?? record.entity_id.replace(/^daily-/, ""))));
+
+  const nutrition = readJson(phase2Key);
+  if (nutrition?.mealLogs && typeof nutrition.mealLogs === "object") {
+    const nextMealLogs = { ...(nutrition.mealLogs as Record<string, unknown>) };
+    mealIds.forEach((id) => {
+      delete nextMealLogs[id];
+    });
+    window.localStorage.setItem(phase2Key, JSON.stringify({ ...nutrition, mealLogs: nextMealLogs }));
+  }
+
+  const training = readJson(phase3Key);
+  if (training) {
+    const nextSessions = training.sessions && typeof training.sessions === "object" ? { ...(training.sessions as Record<string, unknown>) } : {};
+    const nextReadiness = training.readinessByDate && typeof training.readinessByDate === "object" ? { ...(training.readinessByDate as Record<string, unknown>) } : {};
+    workoutIds.forEach((id) => {
+      delete nextSessions[id];
+    });
+    dailyDates.forEach((date) => {
+      delete nextReadiness[date];
+    });
+    window.localStorage.setItem(phase3Key, JSON.stringify({ ...training, sessions: nextSessions, readinessByDate: nextReadiness }));
+  }
+
+  return buildMigrationPreview();
 }

@@ -30,6 +30,26 @@ export type MigrationPreview = {
   total_records: number;
 };
 
+export type MigrationRejectedItem = {
+  record_type: SyncEntityType;
+  client_record_id: string;
+  status: "rejected";
+  code: string;
+  message: string;
+};
+
+export type MigrationResponse = {
+  batch_id: string;
+  status: string;
+  imported_records: number;
+  skipped_records: number;
+  conflict_records: number;
+  error_records: number;
+  summary: MigrationPreview & {
+    rejected_items?: MigrationRejectedItem[];
+  } & Record<string, unknown>;
+};
+
 export type AuthUser = {
   id: string;
   email: string;
