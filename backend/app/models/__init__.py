@@ -6,6 +6,7 @@ from app.models.migration_batch import MigrationBatch
 from app.models.progress_milestone import ProgressMilestone
 from app.models.progress_photo import ProgressPhoto
 from app.models.sync_device import SyncDevice
+from app.models.sync_change import SyncChange
 from app.models.sync_mutation import SyncMutation
 from app.models.user import User
 from app.models.user_profile import UserProfile
@@ -22,6 +23,7 @@ __all__ = [
     "ProgressMilestone",
     "ProgressPhoto",
     "SyncDevice",
+    "SyncChange",
     "SyncMutation",
     "User",
     "UserProfile",

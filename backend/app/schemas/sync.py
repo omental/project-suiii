@@ -71,6 +71,8 @@ class SyncPullRecord(BaseModel):
 
 class SyncPullResponse(BaseModel):
     records: list[SyncPullRecord]
+    next_cursor: str
+    has_more: bool = False
     server_time: datetime
 
 

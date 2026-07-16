@@ -64,41 +64,40 @@ export function WeighingWorkflow({ date, mealId }: { date: string; mealId: strin
   const progress = ((index + 1) / meal.ingredients.length) * 100;
   const diffText = Number.isFinite(actual) ? differenceLabel(actual, currentLog.targetAmount) : "Enter grams";
 
-  function updateCurrent(nextLog: IngredientLog) {
-    const nextLogs = logs.map((log) => (log.ingredientPortionId === nextLog.ingredientPortionId ? nextLog : log));
-    setLogs(nextLogs);
-    saveSession(date, mealId, nextLogs, index);
-    return nextLogs;
-  }
-
   function confirmCurrent() {
     const validation = validateActualAmount(actual, activeLog.targetAmount);
     if (validation) {
       setError(validation);
       return;
     }
-    const nextLogs = updateCurrent({
+    const nextLog = {
       ...activeLog,
       actualAmount: Math.round(actual * 10) / 10,
       skipped: false,
       completedAt: new Date().toISOString()
-    });
+    };
+    const nextLogs = logs.map((log) => (log.ingredientPortionId === nextLog.ingredientPortionId ? nextLog : log));
     if (index === activeMeal.ingredients.length - 1) {
       completeMeal(date, mealId, nextLogs);
       window.setTimeout(() => router.push(`/meals/${date}/${mealId}/complete`), 0);
       return;
     }
+    setLogs(nextLogs);
+    saveSession(date, mealId, nextLogs, index);
     setIndex(index + 1);
     saveSession(date, mealId, nextLogs, index + 1);
   }
 
   function skipIngredient() {
-    const nextLogs = updateCurrent({ ...activeLog, actualAmount: null, skipped: true, completedAt: new Date().toISOString() });
+    const nextLog = { ...activeLog, actualAmount: null, skipped: true, completedAt: new Date().toISOString() };
+    const nextLogs = logs.map((log) => (log.ingredientPortionId === nextLog.ingredientPortionId ? nextLog : log));
     if (index === activeMeal.ingredients.length - 1) {
       completeMeal(date, mealId, nextLogs);
       window.setTimeout(() => router.push(`/meals/${date}/${mealId}/complete`), 0);
       return;
     }
+    setLogs(nextLogs);
+    saveSession(date, mealId, nextLogs, index);
     setIndex(index + 1);
     saveSession(date, mealId, nextLogs, index + 1);
   }

@@ -12,6 +12,7 @@ const eslintConfig = [
       "backend/.pip-cache/**",
       "backend/.pytest_cache/**",
       "backend/.ruff_cache/**",
+      "pytest-cache-files-*/**",
       "backend/pytest-cache-files-*/**",
       "backend/private_uploads/**"
     ]

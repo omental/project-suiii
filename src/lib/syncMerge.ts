@@ -29,6 +29,13 @@ function numberOrNull(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function isSameOrNewer(existing: unknown, record: SyncPullRecord) {
+  if (!existing || typeof existing !== "object") return false;
+  const item = existing as Record<string, unknown>;
+  const version = typeof item.version === "number" ? item.version : 0;
+  return version >= record.server_version && item.serverUpdatedAt === record.server_updated_at;
+}
+
 function pendingKeys(mutations: SyncMutation[]) {
   const keys = new Set<string>();
   mutations.forEach((mutation) => {
@@ -47,18 +54,32 @@ function mergeMeal(record: SyncPullRecord) {
   const id = text(record.payload.id) ?? record.client_record_id;
   const current = readJson(phase2Key()) ?? { version: 2, mealLogs: {}, weighingSessions: {} };
   const mealLogs = current.mealLogs && typeof current.mealLogs === "object" ? { ...current.mealLogs as Record<string, unknown> } : {};
-  if (record.deleted_at) delete mealLogs[id];
-  else mealLogs[id] = { ...record.payload, version: record.server_version, serverUpdatedAt: record.server_updated_at };
+  const existing = mealLogs[id];
+  if (record.deleted_at) {
+    if (!(id in mealLogs)) return false;
+    delete mealLogs[id];
+  } else {
+    if (isSameOrNewer(existing, record)) return false;
+    mealLogs[id] = { ...record.payload, version: record.server_version, serverUpdatedAt: record.server_updated_at };
+  }
   writeJson(phase2Key(), { ...current, version: 2, mealLogs });
+  return true;
 }
 
 function mergeWorkout(record: SyncPullRecord) {
   const id = text(record.payload.id) ?? record.client_record_id;
   const current = readJson(phase3Key()) ?? { version: 3, sessions: {}, readinessByDate: {}, activeSessionId: null };
   const sessions = current.sessions && typeof current.sessions === "object" ? { ...current.sessions as Record<string, unknown> } : {};
-  if (record.deleted_at) delete sessions[id];
-  else sessions[id] = { ...record.payload, version: record.server_version, serverUpdatedAt: record.server_updated_at };
+  const existing = sessions[id];
+  if (record.deleted_at) {
+    if (!(id in sessions)) return false;
+    delete sessions[id];
+  } else {
+    if (isSameOrNewer(existing, record)) return false;
+    sessions[id] = { ...record.payload, version: record.server_version, serverUpdatedAt: record.server_updated_at };
+  }
   writeJson(phase3Key(), { ...current, version: 3, sessions });
+  return true;
 }
 
 function mergeDailyTracking(record: SyncPullRecord) {
@@ -66,8 +87,10 @@ function mergeDailyTracking(record: SyncPullRecord) {
   const current = readJson(phase3Key()) ?? { version: 3, sessions: {}, readinessByDate: {}, activeSessionId: null };
   const readinessByDate = current.readinessByDate && typeof current.readinessByDate === "object" ? { ...current.readinessByDate as Record<string, unknown> } : {};
   if (record.deleted_at) {
+    if (!(date in readinessByDate)) return false;
     delete readinessByDate[date];
   } else {
+    if (isSameOrNewer(readinessByDate[date], record)) return false;
     readinessByDate[date] = {
       ...(readinessByDate[date] && typeof readinessByDate[date] === "object" ? readinessByDate[date] as Record<string, unknown> : {}),
       id: `readiness-${date}`,
@@ -82,6 +105,7 @@ function mergeDailyTracking(record: SyncPullRecord) {
     };
   }
   writeJson(phase3Key(), { ...current, version: 3, readinessByDate });
+  return true;
 }
 
 function mergeMeasurement(record: SyncPullRecord) {
@@ -90,8 +114,11 @@ function mergeMeasurement(record: SyncPullRecord) {
   const existingKey = Object.entries(measurements).find(([, item]) => item.clientRecordId === record.client_record_id)?.[0];
   const id = existingKey ?? text(record.payload.id) ?? record.client_record_id;
   if (record.deleted_at) {
-    if (measurements[id]) measurements[id] = { ...measurements[id], deletedAt: record.deleted_at, version: record.server_version };
+    if (!measurements[id]) return false;
+    if (isSameOrNewer(measurements[id], record)) return false;
+    measurements[id] = { ...measurements[id], deletedAt: record.deleted_at, version: record.server_version, serverUpdatedAt: record.server_updated_at };
   } else {
+    if (isSameOrNewer(measurements[id], record)) return false;
     measurements[id] = {
       id,
       clientRecordId: record.client_record_id,
@@ -110,6 +137,7 @@ function mergeMeasurement(record: SyncPullRecord) {
     };
   }
   writeJson(progressKey(), { ...current, version: 5, measurements });
+  return true;
 }
 
 function mergeCheckIn(record: SyncPullRecord) {
@@ -118,8 +146,11 @@ function mergeCheckIn(record: SyncPullRecord) {
   const existingKey = Object.entries(checkIns).find(([, item]) => item.clientRecordId === record.client_record_id)?.[0];
   const id = existingKey ?? text(record.payload.id) ?? record.client_record_id;
   if (record.deleted_at) {
-    if (checkIns[id]) checkIns[id] = { ...checkIns[id], deletedAt: record.deleted_at, version: record.server_version };
+    if (!checkIns[id]) return false;
+    if (isSameOrNewer(checkIns[id], record)) return false;
+    checkIns[id] = { ...checkIns[id], deletedAt: record.deleted_at, version: record.server_version, serverUpdatedAt: record.server_updated_at };
   } else {
+    if (isSameOrNewer(checkIns[id], record)) return false;
     checkIns[id] = {
       id,
       clientRecordId: record.client_record_id,
@@ -139,20 +170,24 @@ function mergeCheckIn(record: SyncPullRecord) {
     };
   }
   writeJson(progressKey(), { ...current, version: 5, checkIns });
+  return true;
 }
 
 export function mergePulledRecords(records: SyncPullRecord[], pendingMutations: SyncMutation[]) {
   const blocked = pendingKeys(pendingMutations);
-  let downloaded = 0;
+  let applied = 0;
+  let unchanged = 0;
   records.forEach((record) => {
     if (!canMerge(record, blocked)) return;
-    if (record.entity_type === "meal_log") mergeMeal(record);
-    else if (record.entity_type === "workout_session") mergeWorkout(record);
-    else if (record.entity_type === "daily_tracking") mergeDailyTracking(record);
-    else if (record.entity_type === "body_measurement") mergeMeasurement(record);
-    else if (record.entity_type === "weekly_check_in") mergeCheckIn(record);
+    let changed = false;
+    if (record.entity_type === "meal_log") changed = mergeMeal(record);
+    else if (record.entity_type === "workout_session") changed = mergeWorkout(record);
+    else if (record.entity_type === "daily_tracking") changed = mergeDailyTracking(record);
+    else if (record.entity_type === "body_measurement") changed = mergeMeasurement(record);
+    else if (record.entity_type === "weekly_check_in") changed = mergeCheckIn(record);
     else return;
-    downloaded += 1;
+    if (changed) applied += 1;
+    else unchanged += 1;
   });
-  return { downloaded };
+  return { received: records.length, applied, unchanged };
 }

@@ -2,12 +2,18 @@ node_modules
 .next
 out
 coverage
+test-results/
+playwright-report/
+.real-sync-logs/
 .env
 .env.*
 !.env.example
+.env.e2e.local
 .env.local
 .env.*.local
 *.log
+*.out.log
+*.err.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -18,6 +24,7 @@ backend/private_uploads/
 backend/generated_reports/
 private_uploads/
 generated_reports/
+pytest-cache-files-*/
 backend/pytest-cache-files-*/
 backend/.pytest_cache/
 backend/.ruff_cache/

@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { classifyConnectivity, maybeRunReconnectSync, type ConnectivityKind } from "@/lib/connectivity";
 import { getServiceWorkerController, type ServiceWorkerSnapshot } from "@/lib/pwaServiceWorker";
-import { readSyncQueue } from "@/lib/syncQueue";
+import { defaultSyncQueueState, readSyncQueue } from "@/lib/syncQueue";
 
 type PwaContextValue = {
   serviceWorker: ServiceWorkerSnapshot;
@@ -25,6 +25,7 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
   const [serviceWorker, setServiceWorker] = useState(controller.getSnapshot());
   const [browserOnline, setBrowserOnline] = useState(true);
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
+  const [queue, setQueue] = useState(defaultSyncQueueState);
 
   useEffect(() => {
     const listener = (event: Event) => setServiceWorker((event as CustomEvent<ServiceWorkerSnapshot>).detail);
@@ -36,6 +37,7 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const update = () => {
       const online = navigator.onLine;
+      setQueue(readSyncQueue());
       setBrowserOnline(online);
       if (!online) setServerReachable(false);
       if (online) void maybeRunReconnectSync();
@@ -49,7 +51,6 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const queue = readSyncQueue();
   const connectivity = classifyConnectivity(browserOnline, serverReachable, queue.pending.length, queue.failed.length);
 
   return (

@@ -29,6 +29,7 @@ from app.schemas.progress import (
     WeeklyCheckInCreate,
     WeeklyCheckInRead,
 )
+from app.services.sync_service import SyncService
 
 PROGRAMME_DAYS = 90
 DHAKA_TZ = ZoneInfo("Asia/Dhaka")
@@ -77,6 +78,7 @@ class ProgressService:
         measurement = BodyMeasurement(user_id=user_id, **payload.model_dump())
         self.db.add(measurement)
         await self.db.flush()
+        SyncService(self.db).record_change(user_id, "body_measurement", measurement.client_record_id, "upsert")
         return measurement
 
     async def patch_measurement(self, user_id: UUID, measurement_id: UUID, payload: MeasurementPatch) -> BodyMeasurement:
@@ -89,6 +91,7 @@ class ProgressService:
             setattr(measurement, field, value)
         measurement.version += 1
         await self.db.flush()
+        SyncService(self.db).record_change(user_id, "body_measurement", measurement.client_record_id, "upsert")
         return measurement
 
     async def delete_measurement(self, user_id: UUID, measurement_id: UUID) -> None:
@@ -96,6 +99,7 @@ class ProgressService:
         measurement.deleted_at = utc_now()
         measurement.version += 1
         await self.db.flush()
+        SyncService(self.db).record_change(user_id, "body_measurement", measurement.client_record_id, "delete")
 
     async def list_check_ins(self, user_id: UUID) -> list[WeeklyCheckIn]:
         return list(
@@ -132,6 +136,7 @@ class ProgressService:
         check_in = WeeklyCheckIn(user_id=user_id, measurement_id=measurement_id, **data)
         self.db.add(check_in)
         await self.db.flush()
+        SyncService(self.db).record_change(user_id, "weekly_check_in", check_in.client_record_id, "upsert")
         return check_in
 
     async def patch_check_in(self, user_id: UUID, check_in_id: UUID, payload) -> WeeklyCheckIn:
@@ -146,6 +151,7 @@ class ProgressService:
             setattr(check_in, field, value)
         check_in.version += 1
         await self.db.flush()
+        SyncService(self.db).record_change(user_id, "weekly_check_in", check_in.client_record_id, "upsert")
         return check_in
 
     async def complete_check_in(self, user_id: UUID, check_in_id: UUID) -> WeeklyCheckIn:
@@ -166,6 +172,7 @@ class ProgressService:
         check_in.version += 1
         await self.detect_milestones(user_id)
         await self.db.flush()
+        SyncService(self.db).record_change(user_id, "weekly_check_in", check_in.client_record_id, "upsert")
         return check_in
 
     async def profile(self, user_id: UUID) -> UserProfile:

@@ -11,16 +11,17 @@ import { runTwoWaySync } from "@/lib/connectivity";
 import { downloadDeviceDataBackup, getDeviceDataSummary, type DeviceCategoryId, type DeviceCategorySummary, type DeviceDataSummary } from "@/lib/deviceData";
 import { buildMigrationPreview } from "@/lib/localMigration";
 import { disableOfflineAccountAccess } from "@/lib/offlineAccount";
-import { readSyncQueue } from "@/lib/syncQueue";
+import { defaultSyncQueueState, readSyncQueue } from "@/lib/syncQueue";
 import { getCanonicalAccountIdentity, storageKeyFor } from "@/lib/accountStorage";
 import type { MigrationPreview, SyncEntityType } from "@/types/sync";
 
 export function SyncDataPage() {
   const authUser = useAuthenticatedUser();
   const [preview, setPreview] = useState<MigrationPreview>({ meal_logs: 0, workout_sessions: 0, daily_check_ins: 0, sets: 0, date_range: "No local records", total_records: 0 });
-  const [queue, setQueue] = useState(readSyncQueue());
+  const [queue, setQueue] = useState(defaultSyncQueueState);
   const [summary, setSummary] = useState<DeviceDataSummary | null>(null);
   const [browserOnline, setBrowserOnline] = useState(true);
+  const [storageHydrated, setStorageHydrated] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState("");
@@ -35,7 +36,10 @@ export function SyncDataPage() {
   }
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(refreshDeviceData, 0);
+    const timeoutId = window.setTimeout(() => {
+      refreshDeviceData();
+      setStorageHydrated(true);
+    }, 0);
     return () => window.clearTimeout(timeoutId);
   }, []);
 
@@ -150,7 +154,7 @@ export function SyncDataPage() {
           <p className="display text-suii-gold">Private Account</p>
           <h2 className="display text-3xl">{accountName}</h2>
           <p className="text-suii-muted">{authUser.email}</p>
-          <p className="display mt-2 text-suii-gold">This device · {queue.deviceName}</p>
+          <p className="display mt-2 text-suii-gold">{storageHydrated ? `This device · ${queue.deviceName}` : "This device"}</p>
         </section>
         <section className="card mt-4 divide-y divide-white/10 p-4">
           <SyncRow icon={<Utensils />} title="Meals" detail={`${categoryTotal(summary, "nutrition")} cached · ${preview.meal_logs} legacy`} status={categoryStatus(summary, "nutrition", ["meal_log"], statusByEntity)} />
@@ -229,6 +233,7 @@ function SyncDiagnosticsPanel({ userId, queue }: { userId: string; queue: Return
         <p>Local account ID: {identity?.accountId ?? "not initialized"}</p>
         <p>Device ID: {queue.deviceId}</p>
         <p>Namespace: {identity ? storageKeyFor("syncQueue") : "legacy/offline"}</p>
+        <p>Pull cursor: {queue.pullCursor ?? "none"}</p>
         <p>Pending: {queue.pending.length} · Failed: {queue.failed.length} · Last sync: {queue.lastSyncAt ?? "not yet"}</p>
         {[...entityCounts.entries()].map(([entityType, counts]) => (
           <p key={entityType}>{entityType}: {counts.pending} pending · {counts.failed} failed</p>

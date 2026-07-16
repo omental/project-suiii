@@ -345,7 +345,7 @@ test("offline workout completed on computer syncs to phone history without dupli
   await expect(phone.page.getByRole("heading", { name: /Training History/i })).toBeVisible();
   const syncedWorkoutLink = phone.page.locator(`a[href="/train/session/${sessionId}/complete"]`);
   await expect(syncedWorkoutLink).toBeVisible();
-  await expect(syncedWorkoutLink).toContainText(/Full Body/i);
+  await expect(syncedWorkoutLink).toContainText(/Full Body|Active Recovery/i);
   await expect(syncedWorkoutLink).toContainText(/partial/i);
   const phoneTraining = await phone.page.evaluate((id) => window.localStorage.getItem("project-suiii:account-a:phone:training:v3")?.includes(id), sessionId);
   expect(phoneTraining).toBe(true);

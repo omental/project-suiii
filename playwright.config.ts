@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: "**/real-sync.spec.ts",
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

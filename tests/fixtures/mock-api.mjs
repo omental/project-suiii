@@ -9,7 +9,8 @@ const state = {
   failPullOnce: false,
   lastPushedMutations: [],
   records: {},
-  mutations: {}
+  mutations: {},
+  cursor: 0
 };
 
 function json(response, status, body, headers = {}) {
@@ -65,6 +66,7 @@ const server = http.createServer(async (request, response) => {
     state.lastPushedMutations = [];
     state.records = {};
     state.mutations = {};
+    state.cursor = 0;
     return json(response, 200, state);
   }
   if (url.pathname === "/api/v1/auth/me") {
@@ -99,7 +101,9 @@ const server = http.createServer(async (request, response) => {
       state.mutations[accountId][mutation.client_mutation_id] = true;
       const key = `${mutation.entity_type}:${mutation.entity_id}`;
       const version = (state.records[accountId][key]?.server_version ?? 0) + 1;
+      state.cursor += 1;
       state.records[accountId][key] = {
+        sequence: state.cursor,
         entity_type: mutation.entity_type,
         entity_id: mutation.entity_id,
         client_record_id: mutation.payload?.client_record_id ?? mutation.entity_id,
@@ -119,7 +123,9 @@ const server = http.createServer(async (request, response) => {
       state.failPullOnce = false;
       return json(response, 503, { detail: "Temporary pull failure" });
     }
-    return json(response, 200, { records: Object.values(state.records[accountId] ?? {}), server_time: new Date().toISOString() });
+    const cursor = Number(url.searchParams.get("cursor") ?? 0);
+    const records = Object.values(state.records[accountId] ?? {}).filter((record) => !cursor || record.sequence > cursor);
+    return json(response, 200, { records, next_cursor: String(state.cursor), has_more: false, server_time: new Date().toISOString() });
   }
   return json(response, 404, { detail: "Not found" });
 });

@@ -192,6 +192,26 @@ describe("Phase 4 auth and sync screens", () => {
     expect(screen.getByText(/Sign Out/i)).toBeInTheDocument();
   });
 
+  it("renders a neutral device label before hydrating scoped storage", async () => {
+    seedScopedQueue({
+      version: 4,
+      deviceId: "phone-failure",
+      deviceName: "phone-failure",
+      csrfToken: null,
+      pending: [],
+      failed: [],
+      lastSyncAt: null,
+      pullCursor: null,
+      recentActivity: []
+    });
+
+    render(<SyncDataPage />);
+
+    expect(screen.getByText(/^This device$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/phone-failure/i)).not.toBeInTheDocument();
+    expect(await screen.findByText(/This device · phone-failure/i)).toBeInTheDocument();
+  });
+
   it("sync now calls normal push workflow once and never calls migration", async () => {
     seedScopedQueue({
       version: 4,

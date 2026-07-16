@@ -37,6 +37,12 @@ export function isNonRetryableSyncError(error: unknown) {
   return error instanceof ApiError && [401, 403, 409, 422].includes(error.status);
 }
 
+function syncPullLimitQuery() {
+  const raw = process.env.NEXT_PUBLIC_SYNC_PULL_LIMIT;
+  const value = raw ? Number(raw) : null;
+  return value && Number.isInteger(value) && value > 0 ? `limit=${value}` : "";
+}
+
 let syncInFlight = false;
 let automaticAttempts = 0;
 let lastAutomaticAttemptAt: string | null = null;
@@ -95,9 +101,24 @@ export async function runTwoWaySync(mode: "manual" | "auto" = "manual"): Promise
         recentActivity: [`Push accepted: ${uploaded} uploaded, ${conflicts} conflicts, ${rejected} rejected`, ...currentQueue.recentActivity].slice(0, 5)
       });
     }
-    let pull: SyncPullResponse;
+    let nextCursor = currentQueue.pullCursor;
     try {
-      pull = await apiRequest<SyncPullResponse>("/sync/pull");
+      let hasMore = true;
+      while (hasMore) {
+        const params = new URLSearchParams();
+        if (nextCursor) params.set("cursor", nextCursor);
+        const limit = syncPullLimitQuery();
+        if (limit) {
+          const [key, value] = limit.split("=");
+          params.set(key, value);
+        }
+        const query = params.toString() ? `?${params.toString()}` : "";
+        const pull = await apiRequest<SyncPullResponse>(`/sync/pull${query}`);
+        const merge = mergePulledRecords(pull.records, [...nextPending, ...nextFailed]);
+        downloaded += merge.applied;
+        nextCursor = pull.next_cursor;
+        hasMore = pull.has_more;
+      }
     } catch (error) {
       const stillPending = nextPending.length;
       return emptyResult("server_unavailable", {
@@ -110,12 +131,12 @@ export async function runTwoWaySync(mode: "manual" | "auto" = "manual"): Promise
         pullFailed: true
       });
     }
-    downloaded = mergePulledRecords(pull.records, [...nextPending, ...nextFailed]).downloaded;
     const status = await fetchSyncStatus();
     const nextQueue = {
       ...currentQueue,
       pending: nextPending,
       failed: nextFailed,
+      pullCursor: nextCursor,
       lastSyncAt: status.last_sync_at ?? new Date().toISOString(),
       recentActivity: [`${mode === "auto" ? "Reconnect sync" : "Sync"} completed: ${uploaded} uploaded, ${downloaded} downloaded, ${conflicts} conflicts, ${rejected} rejected, ${repair.repaired} repaired`, ...currentQueue.recentActivity].slice(0, 5)
     };

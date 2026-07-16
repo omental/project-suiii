@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:integration": "vitest run src/lib/pwaSprint4.test.ts src/lib/trainingSprint3Audit.test.ts",
     "test:e2e": "npm run build && playwright test",
+    "test:e2e:real-sync": "node scripts/run-real-sync-e2e.mjs",
     "test:all": "npm run test && npm run test:e2e",
     "test:watch": "vitest"
   },

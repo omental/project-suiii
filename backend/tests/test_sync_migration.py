@@ -16,6 +16,7 @@ from app.models.body_measurement import BodyMeasurement
 from app.models.daily_tracking import DailyTracking
 from app.models.meal_log import MealLog
 from app.models.migration_batch import MigrationBatch
+from app.models.sync_change import SyncChange
 from app.models.sync_device import SyncDevice
 from app.models.sync_mutation import SyncMutation
 from app.models.weekly_check_in import WeeklyCheckIn
@@ -47,6 +48,7 @@ class FakeSession:
         self.pending: list[Any] = []
         self.devices: dict[tuple[uuid.UUID, str], SyncDevice] = {}
         self.mutations: dict[tuple[uuid.UUID, str], SyncMutation] = {}
+        self.changes: list[SyncChange] = []
         self.meals: dict[tuple[uuid.UUID, str], MealLog] = {}
         self.workouts: dict[tuple[uuid.UUID, str], WorkoutSession] = {}
         self.daily: dict[tuple[uuid.UUID, date], DailyTracking] = {}
@@ -77,6 +79,8 @@ class FakeSession:
         entity = statement.column_descriptions[0]["entity"]
         params = statement.compile().params
         user_id = params.get("user_id_1")
+        if entity is SyncChange:
+            return max((change.sequence for change in self.changes if change.user_id == user_id), default=0)
         if entity is SyncDevice:
             return self.devices.get((user_id, params.get("device_id_1")))
         if entity is SyncMutation:
@@ -98,7 +102,11 @@ class FakeSession:
         entity = statement.column_descriptions[0]["entity"]
         params = statement.compile().params
         user_id = params.get("user_id_1")
-        if entity is MealLog:
+        if entity is SyncChange:
+            cursor = params.get("sequence_1", -1)
+            records = [change for change in self.changes if change.user_id == user_id and change.sequence > cursor]
+            records.sort(key=lambda change: change.sequence)
+        elif entity is MealLog:
             records = [record for (owner, _), record in self.meals.items() if owner == user_id]
         elif entity is WorkoutSession:
             records = [record for (owner, _), record in self.workouts.items() if owner == user_id]
@@ -129,6 +137,10 @@ class FakeSession:
                 self.devices[(record.user_id, record.device_id)] = record
             elif isinstance(record, SyncMutation):
                 self.mutations[(record.user_id, record.client_mutation_id)] = record
+            elif isinstance(record, SyncChange):
+                record.sequence = len(self.changes) + 1
+                record.server_updated_at = now
+                self.changes.append(record)
             elif isinstance(record, MealLog):
                 self.meals[(record.user_id, record.client_record_id)] = record
             elif isinstance(record, WorkoutSession):
@@ -142,6 +154,10 @@ class FakeSession:
             elif isinstance(record, MigrationBatch):
                 self.batches.append(record)
         self.pending.clear()
+
+    async def refresh(self, record: object) -> None:
+        if getattr(record, "updated_at", None) is None:
+            record.updated_at = datetime.now(UTC)
 
 
 class AutobeginAsyncSession(AsyncSession):
@@ -417,6 +433,120 @@ async def test_sync_records_are_isolated_by_authenticated_user_id() -> None:
     assert len(user_b.records) == 1
     assert user_a.records[0].payload["status"] == "completed"
     assert user_b.records[0].payload["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_initial_pull_returns_snapshot_and_cursor_then_second_pull_is_empty() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="computer-meal"))
+    initial = await service.pull_server_state(USER_ID)
+    second = await service.pull_server_state(USER_ID, cursor=initial.next_cursor)
+
+    assert len(initial.records) == 1
+    assert initial.next_cursor == "1"
+    assert second.records == []
+    assert second.next_cursor == "1"
+
+
+@pytest.mark.asyncio
+async def test_new_change_after_cursor_is_returned_once() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="first-meal"))
+    initial = await service.pull_server_state(USER_ID)
+    await service.apply_mutation(USER_ID, workout_mutation(mutation_id="second-workout"))
+    after_cursor = await service.pull_server_state(USER_ID, cursor=initial.next_cursor)
+    repeat = await service.pull_server_state(USER_ID, cursor=after_cursor.next_cursor)
+
+    assert [(record.entity_type, record.client_record_id) for record in after_cursor.records] == [("workout_session", "session-1")]
+    assert after_cursor.next_cursor == "2"
+    assert repeat.records == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_pull_cursor_is_rejected() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    with pytest.raises(SyncValidationError) as raised:
+        await service.pull_server_state(USER_ID, cursor="not-a-cursor")
+
+    assert raised.value.code == "invalid_cursor"
+
+
+@pytest.mark.asyncio
+async def test_paginated_pull_returns_last_delivered_cursor_and_has_more() -> None:
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="meal-1"))
+    await service.apply_mutation(USER_ID, workout_mutation(mutation_id="workout-2"))
+    await service.apply_mutation(USER_ID, measurement_mutation(mutation_id="measurement-3"))
+
+    first = await service.pull_server_state(USER_ID, cursor="0", limit=2)
+    second = await service.pull_server_state(USER_ID, cursor=first.next_cursor, limit=2)
+
+    assert len(first.records) == 2
+    assert first.next_cursor == "2"
+    assert first.has_more is True
+    assert [(record.entity_type, record.client_record_id) for record in second.records] == [("body_measurement", "measurement-client-1")]
+    assert second.next_cursor == "3"
+    assert second.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_arbitrary_other_user_cursor_does_not_expose_records() -> None:
+    other_user = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    session = FakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    await service.apply_mutation(USER_ID, meal_mutation(mutation_id="user-a-meal"))
+    response = await service.pull_server_state(other_user, cursor="0")
+
+    assert response.records == []
+    assert response.next_cursor == "0"
+
+
+@pytest.mark.asyncio
+async def test_initial_snapshot_watermark_is_captured_before_snapshot_query() -> None:
+    class ConcurrentFakeSession(FakeSession):
+        async def scalar(self, statement: Any) -> object | None:
+            entity = statement.column_descriptions[0]["entity"]
+            if entity is SyncChange:
+                return 1
+            return await super().scalar(statement)
+
+        async def scalars(self, statement: Any) -> Any:
+            entity = statement.column_descriptions[0]["entity"]
+            if entity is MealLog and not self.meals:
+                meal = MealLog(
+                    user_id=USER_ID,
+                    client_record_id="concurrent-meal",
+                    local_date=date(2026, 7, 16),
+                    meal_definition_id="breakfast",
+                    status="completed",
+                    payload={"id": "concurrent-meal", "status": "completed"},
+                    version=1,
+                )
+                meal.updated_at = datetime.now(UTC)
+                self.meals[(USER_ID, "concurrent-meal")] = meal
+                change = SyncChange(user_id=USER_ID, entity_type="meal_log", entity_id="concurrent-meal", operation="upsert")
+                change.sequence = 2
+                change.server_updated_at = datetime.now(UTC)
+                self.changes.append(change)
+            return await super().scalars(statement)
+
+    session = ConcurrentFakeSession()
+    service = SyncService(session)  # type: ignore[arg-type]
+
+    initial = await service.pull_server_state(USER_ID)
+    next_pull = await service.pull_server_state(USER_ID, cursor=initial.next_cursor)
+
+    assert initial.next_cursor == "1"
+    assert any(record.client_record_id == "concurrent-meal" for record in initial.records + next_pull.records)
 
 
 @pytest.mark.asyncio

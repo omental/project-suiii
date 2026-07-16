@@ -11,6 +11,7 @@ export const defaultSyncQueueState: SyncQueueState = {
   pending: [],
   failed: [],
   lastSyncAt: null,
+  pullCursor: null,
   recentActivity: []
 };
 

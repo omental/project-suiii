@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.models.body_measurement import BodyMeasurement
 from app.models.daily_tracking import DailyTracking
 from app.models.meal_log import MealLog
 from app.models.migration_batch import MigrationBatch
+from app.models.sync_change import SyncChange
 from app.models.sync_device import SyncDevice
 from app.models.sync_mutation import SyncMutation
 from app.models.weekly_check_in import WeeklyCheckIn
@@ -170,6 +171,9 @@ class SyncService:
         else:
             result = MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", payload=mutation.payload)
 
+        if result.status == "applied":
+            self.record_change(user_id, mutation.entity_type, self.change_entity_id(mutation), mutation.mutation_type)
+
         stored = SyncMutation(
             user_id=user_id,
             client_mutation_id=mutation.client_mutation_id,
@@ -185,6 +189,16 @@ class SyncService:
         result.mutation_id = stored.id
         stored.response_payload = result.model_dump(mode="json")
         return result
+
+    def record_change(self, user_id: UUID, entity_type: str, entity_id: str, operation: str = "upsert") -> SyncChange:
+        change = SyncChange(user_id=user_id, entity_type=entity_type, entity_id=entity_id, operation=operation)
+        self.db.add(change)
+        return change
+
+    def change_entity_id(self, mutation: MutationRequest) -> str:
+        if mutation.entity_type == "daily_tracking":
+            return str(payload_value(mutation.payload, "tracking_date", "date") or mutation.entity_id)
+        return str(payload_value(mutation.payload, "client_record_id", "id") or mutation.entity_id)
 
     async def _apply_daily_tracking(self, user_id: UUID, mutation: MutationRequest, *, preserve_existing: bool = False) -> MutationResult:
         payload = mutation.payload
@@ -355,88 +369,154 @@ class SyncService:
         await self.db.flush()
         return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
 
-    async def pull_server_state(self, user_id: UUID) -> SyncPullResponse:
+    async def pull_server_state(self, user_id: UUID, cursor: str | None = None, limit: int = 250) -> SyncPullResponse:
+        if limit < 1 or limit > 1000:
+            raise SyncValidationError("invalid_limit", "limit must be between 1 and 1000.", "limit")
+        if cursor is not None:
+            try:
+                parsed_cursor = int(cursor)
+            except ValueError as exc:
+                raise SyncValidationError("invalid_cursor", "cursor must be a server-issued numeric cursor.", "cursor") from exc
+            if parsed_cursor < 0:
+                raise SyncValidationError("invalid_cursor", "cursor must be a server-issued numeric cursor.", "cursor")
+            return await self._pull_changes_after_cursor(user_id, parsed_cursor, limit)
+
+        latest_sequence = await self.db.scalar(select(func.coalesce(func.max(SyncChange.sequence), 0)).where(SyncChange.user_id == user_id))
+        records = await self._snapshot_records(user_id)
+        return SyncPullResponse(records=records, next_cursor=str(int(latest_sequence or 0)), has_more=False, server_time=utc_now())
+
+    async def _snapshot_records(self, user_id: UUID) -> list[SyncPullRecord]:
         records: list[SyncPullRecord] = []
         for row in (await self.db.scalars(select(MealLog).where(MealLog.user_id == user_id))).all():
-            records.append(SyncPullRecord(entity_type="meal_log", entity_id=row.client_record_id, client_record_id=row.client_record_id, server_version=row.version, server_updated_at=row.updated_at, deleted_at=row.deleted_at, payload=row.payload))
+            records.append(self._meal_record(row))
         for row in (await self.db.scalars(select(WorkoutSession).where(WorkoutSession.user_id == user_id))).all():
-            records.append(SyncPullRecord(entity_type="workout_session", entity_id=row.client_record_id, client_record_id=row.client_record_id, server_version=row.version, server_updated_at=row.updated_at, deleted_at=row.deleted_at, payload=row.payload))
+            records.append(self._workout_record(row))
         for row in (await self.db.scalars(select(DailyTracking).where(DailyTracking.user_id == user_id))).all():
-            records.append(
-                SyncPullRecord(
-                    entity_type="daily_tracking",
-                    entity_id=f"daily-{row.tracking_date.isoformat()}",
-                    client_record_id=row.tracking_date.isoformat(),
-                    server_version=row.version,
-                    server_updated_at=row.updated_at,
-                    deleted_at=row.deleted_at,
-                    payload={
-                        "tracking_date": row.tracking_date.isoformat(),
-                        "water_ml": row.water_ml,
-                        "cigarettes": row.cigarettes,
-                        "sleep_minutes": row.sleep_minutes,
-                        "badminton_games": row.badminton_games,
-                        "energy": row.energy,
-                        "soreness": row.soreness,
-                        "notes": row.notes,
-                        "version": row.version,
-                    },
-                )
-            )
+            records.append(self._daily_record(row))
         for row in (await self.db.scalars(select(BodyMeasurement).where(BodyMeasurement.user_id == user_id))).all():
-            records.append(
-                SyncPullRecord(
-                    entity_type="body_measurement",
-                    entity_id=row.client_record_id,
-                    client_record_id=row.client_record_id,
-                    server_version=row.version,
-                    server_updated_at=row.updated_at,
-                    deleted_at=row.deleted_at,
-                    payload={
-                        "id": str(row.id),
-                        "client_record_id": row.client_record_id,
-                        "measured_at": row.measured_at.isoformat(),
-                        "local_date": row.local_date.isoformat(),
-                        "weight_kg": float(row.weight_kg) if row.weight_kg is not None else None,
-                        "waist_in": float(row.waist_in) if row.waist_in is not None else None,
-                        "chest_in": float(row.chest_in) if row.chest_in is not None else None,
-                        "arm_in": float(row.arm_in) if row.arm_in is not None else None,
-                        "thigh_in": float(row.thigh_in) if row.thigh_in is not None else None,
-                        "source": row.source,
-                        "note": row.note,
-                        "version": row.version,
-                        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
-                    },
-                )
-            )
+            records.append(self._measurement_record(row))
         for row in (await self.db.scalars(select(WeeklyCheckIn).where(WeeklyCheckIn.user_id == user_id))).all():
-            records.append(
-                SyncPullRecord(
-                    entity_type="weekly_check_in",
-                    entity_id=row.client_record_id,
-                    client_record_id=row.client_record_id,
-                    server_version=row.version,
-                    server_updated_at=row.updated_at,
-                    deleted_at=row.deleted_at,
-                    payload={
-                        "id": str(row.id),
-                        "client_record_id": row.client_record_id,
-                        "week_number": row.week_number,
-                        "check_in_date": row.check_in_date.isoformat(),
-                        "status": row.status,
-                        "energy": row.energy,
-                        "hunger": row.hunger,
-                        "digestion": row.digestion,
-                        "average_sleep_minutes": row.average_sleep_minutes,
-                        "private_note": row.private_note,
-                        "measurement_id": str(row.measurement_id) if row.measurement_id else None,
-                        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
-                        "version": row.version,
-                        "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
-                    },
-                )
+            records.append(self._check_in_record(row))
+        return records
+
+    async def _pull_changes_after_cursor(self, user_id: UUID, cursor: int, limit: int) -> SyncPullResponse:
+        changes = (
+            await self.db.scalars(
+                select(SyncChange)
+                .where(SyncChange.user_id == user_id, SyncChange.sequence > cursor)
+                .order_by(SyncChange.sequence.asc())
+                .limit(limit + 1)
             )
-        return SyncPullResponse(records=records, server_time=utc_now())
+        ).all()
+        page = list(changes[:limit])
+        records: list[SyncPullRecord] = []
+        for change in page:
+            record = await self._record_for_change(user_id, change)
+            if record is not None:
+                records.append(record)
+        next_cursor = str(page[-1].sequence if page else cursor)
+        return SyncPullResponse(records=records, next_cursor=next_cursor, has_more=len(changes) > limit, server_time=utc_now())
+
+    async def _record_for_change(self, user_id: UUID, change: SyncChange) -> SyncPullRecord | None:
+        if change.entity_type == "meal_log":
+            row = await self.db.scalar(select(MealLog).where(MealLog.user_id == user_id, MealLog.client_record_id == change.entity_id))
+            return self._meal_record(row) if row else None
+        if change.entity_type == "workout_session":
+            row = await self.db.scalar(select(WorkoutSession).where(WorkoutSession.user_id == user_id, WorkoutSession.client_record_id == change.entity_id))
+            return self._workout_record(row) if row else None
+        if change.entity_type == "daily_tracking":
+            entity_date = change.entity_id.removeprefix("daily-")
+            try:
+                tracking_date = date.fromisoformat(entity_date)
+            except ValueError:
+                tracking_date = date.fromisoformat(change.entity_id)
+            row = await self.db.scalar(select(DailyTracking).where(DailyTracking.user_id == user_id, DailyTracking.tracking_date == tracking_date))
+            return self._daily_record(row) if row else None
+        if change.entity_type == "body_measurement":
+            row = await self.db.scalar(select(BodyMeasurement).where(BodyMeasurement.user_id == user_id, BodyMeasurement.client_record_id == change.entity_id))
+            return self._measurement_record(row) if row else None
+        if change.entity_type == "weekly_check_in":
+            row = await self.db.scalar(select(WeeklyCheckIn).where(WeeklyCheckIn.user_id == user_id, WeeklyCheckIn.client_record_id == change.entity_id))
+            return self._check_in_record(row) if row else None
+        return None
+
+    def _meal_record(self, row: MealLog) -> SyncPullRecord:
+        return SyncPullRecord(entity_type="meal_log", entity_id=row.client_record_id, client_record_id=row.client_record_id, server_version=row.version, server_updated_at=row.updated_at, deleted_at=row.deleted_at, payload=row.payload)
+
+    def _workout_record(self, row: WorkoutSession) -> SyncPullRecord:
+        return SyncPullRecord(entity_type="workout_session", entity_id=row.client_record_id, client_record_id=row.client_record_id, server_version=row.version, server_updated_at=row.updated_at, deleted_at=row.deleted_at, payload=row.payload)
+
+    def _daily_record(self, row: DailyTracking) -> SyncPullRecord:
+        return SyncPullRecord(
+            entity_type="daily_tracking",
+            entity_id=f"daily-{row.tracking_date.isoformat()}",
+            client_record_id=row.tracking_date.isoformat(),
+            server_version=row.version,
+            server_updated_at=row.updated_at,
+            deleted_at=row.deleted_at,
+            payload={
+                "tracking_date": row.tracking_date.isoformat(),
+                "water_ml": row.water_ml,
+                "cigarettes": row.cigarettes,
+                "sleep_minutes": row.sleep_minutes,
+                "badminton_games": row.badminton_games,
+                "energy": row.energy,
+                "soreness": row.soreness,
+                "notes": row.notes,
+                "version": row.version,
+            },
+        )
+
+    def _measurement_record(self, row: BodyMeasurement) -> SyncPullRecord:
+        return SyncPullRecord(
+            entity_type="body_measurement",
+            entity_id=row.client_record_id,
+            client_record_id=row.client_record_id,
+            server_version=row.version,
+            server_updated_at=row.updated_at,
+            deleted_at=row.deleted_at,
+            payload={
+                "id": str(row.id),
+                "client_record_id": row.client_record_id,
+                "measured_at": row.measured_at.isoformat(),
+                "local_date": row.local_date.isoformat(),
+                "weight_kg": float(row.weight_kg) if row.weight_kg is not None else None,
+                "waist_in": float(row.waist_in) if row.waist_in is not None else None,
+                "chest_in": float(row.chest_in) if row.chest_in is not None else None,
+                "arm_in": float(row.arm_in) if row.arm_in is not None else None,
+                "thigh_in": float(row.thigh_in) if row.thigh_in is not None else None,
+                "source": row.source,
+                "note": row.note,
+                "version": row.version,
+                "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+            },
+        )
+
+    def _check_in_record(self, row: WeeklyCheckIn) -> SyncPullRecord:
+        return SyncPullRecord(
+            entity_type="weekly_check_in",
+            entity_id=row.client_record_id,
+            client_record_id=row.client_record_id,
+            server_version=row.version,
+            server_updated_at=row.updated_at,
+            deleted_at=row.deleted_at,
+            payload={
+                "id": str(row.id),
+                "client_record_id": row.client_record_id,
+                "week_number": row.week_number,
+                "check_in_date": row.check_in_date.isoformat(),
+                "status": row.status,
+                "energy": row.energy,
+                "hunger": row.hunger,
+                "digestion": row.digestion,
+                "average_sleep_minutes": row.average_sleep_minutes,
+                "private_note": row.private_note,
+                "measurement_id": str(row.measurement_id) if row.measurement_id else None,
+                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                "version": row.version,
+                "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None,
+            },
+        )
 
     async def _apply_domain_record(self, user_id: UUID, mutation: MutationRequest, model: type[MealLog] | type[WorkoutSession], definition_field: str, *, preserve_existing: bool = False) -> MutationResult:
         payload = mutation.payload
@@ -473,6 +553,7 @@ class SyncService:
             record.completed_at = completed_at
             record.version = next_version(record.version, payload.get("version", 1))
         await self.db.flush()
+        await self.db.refresh(record)
         return MutationResult(mutation_id=UUID(int=0), entity_type=mutation.entity_type, entity_id=mutation.entity_id, status="applied", server_version=record.version, payload={"id": str(record.id), "updated_at": record.updated_at.isoformat()})
 
     async def migrate_local_data(self, user_id: UUID, request: MigrationRequest) -> MigrationResponse:

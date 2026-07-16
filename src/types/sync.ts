@@ -29,6 +29,7 @@ export type SyncQueueState = {
   pending: SyncMutation[];
   failed: SyncMutation[];
   lastSyncAt: string | null;
+  pullCursor: string | null;
   recentActivity: string[];
 };
 
@@ -86,6 +87,8 @@ export type SyncPullRecord = {
 
 export type SyncPullResponse = {
   records: SyncPullRecord[];
+  next_cursor: string;
+  has_more: boolean;
   server_time: string;
 };
 
